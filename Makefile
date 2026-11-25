@@ -24,4 +24,10 @@ stress: $(SRC)
 	mv $(BINARY) STRESS.WMF
 	$(MAKE) -B $(BINARY)
 
-.PHONY: all test clean stress
+# the recovery test build: every 200th PUSH loses all its W_ENDs
+fault: $(SRC)
+	$(SJASM) --nologo --msg=war --inc=src -DFAULT=200 src/main.asm
+	mv $(BINARY) FAULT.WMF
+	$(MAKE) -B $(BINARY)
+
+.PHONY: all test clean stress fault

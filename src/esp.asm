@@ -293,6 +293,17 @@ esp_fill:
 esp_push:
     push hl
     push de
+    IFDEF FAULT
+    ; the test build: every FAULT-th PUSH loses all its W_ENDs, the plugin gives
+    ; up and sends the block again (what a W_END the ESP missed leads to)
+    ld hl,fault_n
+    dec (hl)
+    jr nz,.nof
+    ld (hl),FAULT
+    ld a,1
+    ld (fault_on),a
+.nof:
+    ENDIF
     ld (esp_tmp4),de
     ld hl,0
     ld (esp_tmp4+2),hl
@@ -365,16 +376,18 @@ esp_push:
 .sent:
     call esp_cs_off
 .wend:
+    IFDEF FAULT
+    ld a,(fault_on)
+    or a
+    jr z,.nofault
+    ld a,E_ST_M2S               ; this W_END lost: the status stays M2S
+    jr .lostw
+.nofault:
+    ENDIF
     call esp_cs_on
     ld a,SPI_W_END : out (SPI_DATA),a
     in a,(SPI_DATA)
     call esp_cs_off
-    ; no SPI frame for ~60 us (at 14 MHz): the ESP arms its next DMA in the
-    ; interrupt of the W_END, which resets its SPI slave; a status read in that
-    ; moment could be cut
-    ld b,64
-.idle:
-    djnz .idle
     ld c,1                      ; M2S counts as busy until the W_END is taken
     call esp_wait
     jr nc,.ended
@@ -383,6 +396,7 @@ esp_push:
     ; A timeout of esp_wait says BUSY: the status itself is read again
     ld d,E_REG_STATUS
     call esp_rd8
+.lostw:
     cp E_ST_M2S
     jr nz,.fail
     ld hl,esp_wtry
@@ -398,6 +412,10 @@ esp_push:
     or a
     ret
 .fail:
+    IFDEF FAULT
+    xor a
+    ld (fault_on),a
+    ENDIF
     call esp_rd_state
     scf
     ret

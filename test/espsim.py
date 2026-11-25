@@ -24,7 +24,7 @@ class EspSim(Sim):
     def __init__(self, wmf, data, name=b"test.mp3", esp=True, audio=True,
                  rate=44100, channels=2, bits=0, total=0, byte_rate=None,
                  seekable=True, busy_polls=2, fmt_found=None, fail=0, late_push=(), late_polls=70000,
-                 lost_wend=(), **kw):
+                 lost_wend=(), rearm=False, **kw):
         self.esp = esp                  # an ESP answers on the SPI at all
         self.audio = audio              # its firmware has the audio player
         self.rate = rate
@@ -45,6 +45,9 @@ class EspSim(Sim):
         self.arm_in = 0
         self.armed = False
         self.queued = None              # size of a PUSH queued behind the armed DMA
+        # the firmware of 0d4e52c: a PUSH while the DMA is armed gets M2S again and
+        # the armed DMA takes its data (type and size read at the W_END)
+        self.rearm = rearm
         self.fmt_found = fmt_found
         self.fail = fail                # an error code: the decoder refuses the stream
         self.regs = bytearray(64)
@@ -184,6 +187,11 @@ class EspSim(Sim):
                 self.refused += 1
                 self.put_state()
                 self.status(ERR_INV_SIZE)
+                return
+            if self.rearm and self.armed:
+                self.push_n = n
+                self.data_rx = None
+                self.regs[1] = ST_M2S
                 return
             if self.armed or self.arm_in:
                 # queued behind the armed DMA (the rx queue of 2e9589d): the

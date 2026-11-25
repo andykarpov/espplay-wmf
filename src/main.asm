@@ -578,6 +578,7 @@ ST_ERROR    equ 26
 ST_BITS     equ 27
 ESP_ST_LEN  equ 28
 esp_fmt     ds 1
+esp_wtry    ds 1
 esp_ended   ds 1
 esp_sent_end ds 1
 esp_fmt_shown ds 1

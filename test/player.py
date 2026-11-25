@@ -109,6 +109,17 @@ code = s.run(max_frames=3000)
 t("late DMA: the file still reaches the ESP whole", code == 2 and bytes(s.esp_streams[0][1]) == cbr,
   (code, len(s.esp_streams[0][1])))
 
+s = mp3(cbr, byte_rate=FAST, lost_wend=(30,))
+code = s.run(max_frames=3000)
+t("a missed W_END: sent again, the file whole", code == 2 and bytes(s.esp_streams[0][1]) == cbr
+  and s.wends == s.pushes + 1, (code, len(s.esp_streams[0][1]), s.pushes, s.wends))
+# after all the waits (an ESP stalled for seconds): the firmware of 2e9589d then
+# lags one PUSH behind for good (the PUSH queued behind says BUSY over the M2S);
+# the player is slow but still takes keys
+s = mp3(cbr, byte_rate=FAST, late_push=(40,), late_polls=400000, keys={1500: "esc"})
+code = s.run(max_frames=3000)
+t("very late DMA (after all the waits): Esc still works", code == 0 and s.cmds[-1] == 0x96, (code, s.cmds[-3:]))
+
 # -- the ESP refuses the stream: the error on the screen, then the next file
 s = EspSim(WMF, wav, fail=0xC0, **WAV)
 code = s.run(snap_at=(40,))

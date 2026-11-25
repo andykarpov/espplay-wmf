@@ -23,7 +23,8 @@ IN_SIZE = 512 * 1024
 class EspSim(Sim):
     def __init__(self, wmf, data, name=b"test.mp3", esp=True, audio=True,
                  rate=44100, channels=2, bits=0, total=0, byte_rate=None,
-                 seekable=True, busy_polls=2, fmt_found=None, fail=0, late_push=(), late_polls=70000, **kw):
+                 seekable=True, busy_polls=2, fmt_found=None, fail=0, late_push=(), late_polls=70000,
+                 lost_wend=(), **kw):
         self.esp = esp                  # an ESP answers on the SPI at all
         self.audio = audio              # its firmware has the audio player
         self.rate = rate
@@ -39,8 +40,11 @@ class EspSim(Sim):
         self.late_push = set(late_push)
         self.late_polls = late_polls
         self.pushes = 0
+        self.lost_wend = set(lost_wend)     # the W_END of these PUSHes is not seen (once)
+        self.wends = 0
         self.arm_in = 0
         self.armed = False
+        self.queued = None              # size of a PUSH queued behind the armed DMA
         self.fmt_found = fmt_found
         self.fail = fail                # an error code: the decoder refuses the stream
         self.regs = bytearray(64)
@@ -130,6 +134,10 @@ class EspSim(Sim):
         elif cmd == WR_DATA:
             self.data_rx = bytes(outs[1:])
         elif cmd == W_END:
+            k = self.wends
+            self.wends += 1
+            if k in self.lost_wend:
+                return                  # missed: the DMA stays armed, status M2S
             self.push_done()
 
     # -- the player -------------------------------------------------------
@@ -178,7 +186,12 @@ class EspSim(Sim):
                 self.status(ERR_INV_SIZE)
                 return
             if self.armed or self.arm_in:
-                return                  # queued behind the armed DMA: no M2S
+                # queued behind the armed DMA (the rx queue of 2e9589d): the
+                # command handler says BUSY over the M2S of the armed one; it
+                # arms when that one is done
+                self.queued = n
+                self.regs[1] = ST_BUSY
+                return
             self.push_n = n
             k = self.pushes
             self.pushes += 1
@@ -220,7 +233,8 @@ class EspSim(Sim):
 
     def push_done(self):
         if not self.armed or self.data_rx is None:
-            self.data_rx = None         # nothing armed: the data is lost
+            if not self.armed:
+                self.data_rx = None     # nothing armed: the data is lost
             return
         self.armed = False
         d = self.data_rx[:self.push_n]
@@ -231,6 +245,13 @@ class EspSim(Sim):
         self.ring += len(d)
         self.data_rx = None
         self.put_state()
+        if self.queued is not None:
+            self.push_n = self.queued
+            self.queued = None
+            self.pushes += 1
+            self.armed = True
+            self.regs[1] = ST_M2S
+            return
         self.status(ST_READY)
 
     def new_frame(self):

@@ -53,6 +53,8 @@ A_FMT_OGG       equ 3
 A_FMT_FLAC      equ 4
 
 A_FLAG_SEEKABLE equ #01
+M2S_WAITS       equ 4           ; esp_wait rounds for the M2S of a PUSH
+WEND_TRIES      equ 3           ; W_END sent again while the ESP stays in M2S
 
 ;; ---------------------------------------------------------------------------
 ;; SPI primitives
@@ -299,15 +301,33 @@ esp_push:
     call esp_wr32
     ld a,E_CMD_PUSH
     call esp_cmd
+    ; M2S may come late (the receiver task of the ESP was seen to arm its DMA
+    ; after more than one esp_wait, ~0.6 s): wait up to M2S_WAITS of them
+    ld b,M2S_WAITS
+.m2s:
+    push bc
     ld c,0
     call esp_wait
+    pop bc
+    jr nc,.got
+    djnz .m2s
+    scf
+.got:
     pop de
     pop hl
     ; no M2S in time: the ESP may arm its DMA a moment later and then wait for
     ; this data for ever (a new PUSH can not get M2S again): send it anyway
-    jr c,.send
+    jr c,.blind
     cp E_ST_M2S
     jr nz,.fail                 ; refused (INV_STATE, INV_SIZE ...)
+    ld a,WEND_TRIES
+    jr .tries
+.blind:
+    ; sent without M2S: an M2S after the W_END may be of a PUSH queued behind
+    ; (the next one), not this one: no second W_END
+    ld a,1
+.tries:
+    ld (esp_wtry),a
 .send:
     push de
     call esp_cs_on
@@ -344,13 +364,26 @@ esp_push:
     djnz .z
 .sent:
     call esp_cs_off
+.wend:
     call esp_cs_on
     ld a,SPI_W_END : out (SPI_DATA),a
     in a,(SPI_DATA)
     call esp_cs_off
     ld c,1                      ; M2S counts as busy until the W_END is taken
     call esp_wait
-    jr c,.fail
+    jr nc,.ended
+    ; still M2S: the ESP has the data but missed the W_END (seen on the board
+    ; after minutes: every later PUSH then lagged one behind): send it again.
+    ; A timeout of esp_wait says BUSY: the status itself is read again
+    ld d,E_REG_STATUS
+    call esp_rd8
+    cp E_ST_M2S
+    jr nz,.fail
+    ld hl,esp_wtry
+    dec (hl)
+    jr nz,.wend
+    jr .fail
+.ended:
     push af
     call esp_rd_state
     pop af

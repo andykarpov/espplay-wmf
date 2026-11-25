@@ -1,11 +1,11 @@
-;; ESPPLAY.WMF - Wild Commander plugin that plays MP3, WAV, Ogg Vorbis and
-;; FLAC on the ESP32 of TS-Conf (ZiFi32 with the audio stream player,
+;; ESPPLAY.WMF - Wild Commander plugin that plays MP3, WAV, Ogg Vorbis, FLAC,
+;; AAC and M4A, and play lists of them (.m3u, .m3u8, .pls), on the ESP32 of TS-Conf (ZiFi32 with the audio stream player,
 ;; ESP_CMD_AUDIO_*): the plugin reads the file and pushes it over the SPI, the
 ;; ESP decodes it and mixes it into its sound output.
 ;;
 ;; Build: sjasmplus --inc=src src/main.asm  ->  ESPPLAY.WMF
 
-    DEFINE VERSION "1.0.1"
+    DEFINE VERSION "1.1.0"
 
 CPU_CLOCK       equ 2           ; TURBOPL: 0 = 3.5, 1 = 7, 2 = 14 MHz
 SEEK_SEC        equ 10          ; seconds per <- / ->
@@ -32,8 +32,8 @@ header:
     ds 5*2                                  ;     no more blocks
     ds 15                                   ; +48
     db 0                                    ; +63 run by ENTER and F3
-    db "MP3", "WAV", "OGG", "FLA"           ; +64 extensions (FLA: what WC takes of .flac)
-    ds 28*3
+    db "MP3", "WAV", "OGG", "FLA", "AAC", "M4A", "M3U", "PLS" ; +64 extensions (FLA: .flac, M3U: .m3u8 too)
+    ds 24*3
     db 0                                    ; +160
     dd #FFFFFFFF                            ; +161 any file size
 name_start:
@@ -103,6 +103,22 @@ entry:
     xor a                       ; WCX_ESC
     ret
 .found:
+    call pl_check               ; a play list: its entries one after the other
+    jr z,play_file
+    jr nc,play_file
+    ld a,EXIT_ESC               ; no entries: say so, back to WC
+    ld (exit_req),a
+    ld hl,s_pl_empty
+    jp pl_fail
+
+;; One file: the one WC passed, or entry pl_idx of the play list
+play_file:
+    ld a,(pl_mode)
+    or a
+    jr z,.one
+    call pl_open
+    jp c,pl_over
+.one:
     ; code and data stay loaded between runs: set everything up again
     xor a
     ld (paused),a
@@ -131,7 +147,14 @@ entry:
 
     xor a
     ld (esp_fmt_shown),a
+    ld a,(radio)
+    or a
+    jr z,.file
+    call esp_radio              ; a URL of the play list: the ESP reads it
+    jr .go
+.file:
     call esp_start
+.go:
     jr nc,.started
     call diag                   ; the ESP refused the stream: say what it answered
     xor a                       ; WCX_ESC
@@ -174,6 +197,23 @@ entry:
 .alen:
     call mpeg_scan
 .seekst:
+    ; no title in the tags: the one of the play list
+    ld a,(pl_mode)
+    or a
+    jr z,.notitle
+    ld a,(f_title)
+    or a
+    jr nz,.notitle
+    ld a,(pe_title)
+    or a
+    jr z,.notitle
+    ld hl,pe_title
+    ld de,f_title
+    ld bc,FLD_LEN + 1
+    ldir
+    ld a,1
+    ld (id3_found),a
+.notitle:
     ld hl,(audio_start)
     ld de,(audio_start+2)
     call rd_seek
@@ -191,6 +231,9 @@ main_loop:
     or a
     jp nz,do_exit
     ld a,(paused)
+    ld b,a
+    ld a,(radio)                ; radio: nothing to send
+    or b
     ld b,a
     ld a,(eof)
     or b
@@ -215,6 +258,9 @@ main_loop:
 ;; Once per frame: redraw a part of the window, watch the end of the track
 frame_tick:
     call esp_tick
+    ld a,(radio)
+    or a
+    call nz,esp_meta
     ld hl,fcnt
     inc (hl)
     ld a,(hl)
@@ -516,6 +562,33 @@ do_exit:
     call nz,esp_stop            ; stop the sound unless the track played out
     ld ix,wnd
     WCALL WCF_RRESB
+    ; a play list: the next / previous entry, Esc or its end back to WC
+    ld a,(pl_mode)
+    or a
+    jr z,exit_panel
+    ld a,(exit_req)
+    cp EXIT_ESC
+    jr z,exit_panel
+    cp EXIT_PREV
+    jr z,.prev
+    ld hl,(pl_idx)
+    inc hl
+    ld (pl_idx),hl
+    jr .again
+.prev:
+    ld hl,(pl_idx)
+    ld a,h : or l
+    jr z,.again                 ; the first one again
+    dec hl
+    ld (pl_idx),hl
+.again:
+    ld sp,(entry_sp)
+    jp play_file
+;; The list is over: as the end of a file
+pl_over:
+    ld a,EXIT_END
+    ld (exit_req),a
+exit_panel:
     ld a,(exit_req)
     cp EXIT_PREV
     ld b,WCX_PREV
@@ -543,6 +616,8 @@ do_exit:
     include "id3.asm"
     include "mpeg.asm"
     include "ui.asm"
+    include "playlist.asm"
+    include "wifi.asm"
 
 ;; Kept while WC keeps the plugin loaded: the volume of the last track
 vol         db VOL_START
@@ -587,7 +662,7 @@ dvd         ds 4
 m32         ds 4
 utoa_st     ds 1
 ; ESP: the state block of AUDIO_GET_STATE (registers #10..#2B)
-esp_st      ds 28
+esp_st      ds 33
 ST_STATE    equ 0
 ST_FMT      equ 1
 ST_CHANNELS equ 2
@@ -600,12 +675,35 @@ ST_BUFFERED equ 20
 ST_UNDER    equ 24
 ST_ERROR    equ 26
 ST_BITS     equ 27
-ESP_ST_LEN  equ 28
+ST_BITRATE  equ 28
+ST_META     equ 32
+ESP_ST_LEN  equ 33
 esp_fmt     ds 1
 esp_wtry    ds 1
 stress_n    ds 1
 fault_n     ds 1
 fault_on    ds 1
+esp_xcmd    ds 1
+radio       ds 1                ; the entry is a URL: the ESP reads it
+meta_seen   ds 1
+meta_len    ds 1
+wf_in       ds 1
+wf_len      ds 1
+wf_size     ds 2
+wf_ssid     ds 33
+wf_pass     ds 64
+; play list
+pl_mode     ds 1                ; 0, PL_M3U, PL_PLS
+rd_entry    ds 1                ; the stream is on a list entry
+pl_size     ds 4
+pl_idx      ds 2
+pl_count    ds 2
+pl_found    ds 2
+pl_want     ds 2
+pl_hit      ds 1
+pl_bom      ds 1
+lptr        ds 2
+rt_src      ds 2
 esp_ended   ds 1
 esp_sent_end ds 1
 esp_fmt_shown ds 1
@@ -664,6 +762,11 @@ f_album     ds FLD_LEN+1
 f_year      ds 5
 f_track     ds 9
 f_genre     ds 21
+pe_title    ds FLD_LEN+1
+lstbuf      ds 24
+pe_buf      ds 257              ; FENTRY: flag, path, 0
+    ALIGN 256
+lbuf        ds 256              ; a line of the list (pl_line: at xx00)
 vars_end:
     ASSERT vars_end <= BUF
 

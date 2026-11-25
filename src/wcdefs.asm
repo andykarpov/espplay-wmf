@@ -25,7 +25,12 @@ WCF_BSPC        equ #18
 WCF_KBSCN       equ #2A         ; A' = 1: NZ, A = char of the pressed key
 WCF_USPO        equ #2E         ; wait until all keys are released
 WCF_LOAD512     equ #30         ; HL = buffer, B = sectors: read the file on
-WCF_GIPAGPL     equ #32         ; rewind the file to its start
+WCF_GIPAGPL     equ #32         ; rewind to the start of the file WC passed to the plugin
+WCF_STREAM      equ #39         ; D = #FE clone the panel's stream into 0 / 1, #FF root of
+                                ; the active one, 0 / 1 with BC = #FFFF: make it active
+WCF_FENTRY      equ #3B         ; HL = flag (0 file, #10 dir), name or path, 0: find it in
+                                ; the active folder; NZ found, DE:HL = its length
+WCF_GFILE       equ #3E         ; the stream on the file FENTRY found (once per FENTRY)
 WCF_LOADNONE    equ #3D         ; B = sectors: skip them without reading
 
 ; exit codes in A

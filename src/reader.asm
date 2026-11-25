@@ -9,8 +9,7 @@ BUF_SECT        equ 4           ; small reads keep the FIFO topped up on a slow 
 BUFSZ           equ BUF_SECT*512
 
 rd_init:
-    ld ix,(panel_ix)
-    WCALL WCF_GIPAGPL
+    call rd_rewind
     ld hl,0
     ld (file_pos),hl : ld (file_pos+2),hl
     ld (buf_base),hl : ld (buf_base+2),hl
@@ -153,8 +152,7 @@ rd_seek:
     ex de,hl
     ld bc,(file_pos+2) : sbc hl,bc
     jr nc,.fwd
-    ld ix,(panel_ix)
-    WCALL WCF_GIPAGPL
+    call rd_rewind
     ld hl,0
     ld (file_pos),hl
     ld (file_pos+2),hl

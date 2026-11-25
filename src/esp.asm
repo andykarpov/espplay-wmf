@@ -19,9 +19,14 @@ E_REG_STATUS    equ #01
 E_REG_PARAM     equ #02         ; AUDIO_FORMAT / AUDIO_PARAM
 E_REG_SIZE      equ #03         ; DATA_SIZE, 4 bytes
 E_REG_OFFSET    equ #07         ; DATA_OFFSET, 4 bytes
-E_REG_STATE     equ #10         ; state block #10..#2B
+E_REG_STATE     equ #10         ; state block #10..#30
 
 E_CMD_GET_VER   equ #02
+E_CMD_SET_URL   equ #18
+E_CMD_URL       equ #98
+E_CMD_META      equ #99
+E_REG_STR_SIZE  equ #02
+E_REG_STR_DATA  equ #03
 E_CMD_START     equ #90
 E_CMD_PUSH      equ #91
 E_CMD_END       equ #92
@@ -51,10 +56,14 @@ A_FMT_WAV       equ 1
 A_FMT_MP3       equ 2
 A_FMT_OGG       equ 3
 A_FMT_FLAC      equ 4
+A_FMT_AAC       equ 5
+A_FMT_M4A       equ 6
 
 A_FLAG_SEEKABLE equ #01
 M2S_WAITS       equ 4           ; esp_wait rounds for the M2S of a PUSH
 WEND_TRIES      equ 3           ; W_END sent again while the ESP stays in M2S
+A_FLAG_RADIO    equ #08
+A_FLAG_CONNECT  equ #10
 
 ;; ---------------------------------------------------------------------------
 ;; SPI primitives
@@ -211,6 +220,7 @@ esp_start:
     ld e,a
     ld a,E_CMD_START
     call esp_run_p
+    ld (esp_ans),a              ; for the window if refused
     ret c
     cp E_ST_READY
     scf
@@ -218,6 +228,101 @@ esp_start:
     ld a,(vol)
     call esp_volume
     call esp_rd_state
+    or a
+    ret
+
+;; Radio: the URL in pe_buf + 1 to the ESP (SET_URL), then AUDIO_URL
+;; OUT: CF = 1 refused
+esp_radio:
+    xor a
+    ld (esp_fmt),a              ; told by the ESP
+    ld (esp_ended),a
+    ld (esp_sent_end),a
+    ld (esp_base),a
+    ld (esp_base+1),a
+    ld (meta_seen),a
+    call net_up                 ; no network: the one of /zifi/gopher.ini
+    ld hl,pe_buf + 1
+    call strlen                 ; BC = length
+    ld d,b
+    ld e,c
+    ld hl,pe_buf + 1
+    ld a,E_CMD_SET_URL
+    call esp_send
+    ld a,E_ST_BUSY              ; not taken: as a refused START
+    ld (esp_ans),a
+    ret c
+    ld e,A_FMT_AUTO             ; the format from Content-Type
+    ld a,E_CMD_URL
+    call esp_run_p
+    ld (esp_ans),a
+    ret c
+    cp E_ST_READY
+    scf
+    ret nz
+    ld a,(vol)
+    call esp_volume
+    call esp_rd_state
+    or a
+    ret
+
+;; Radio: a new station name / title (META_SEQ changed): into fname / f_title
+;; and on the screen. Called once a frame.
+esp_meta:
+    ld a,(esp_st + ST_META)
+    ld hl,meta_seen
+    cp (hl)
+    ret z
+    ld (hl),a
+    ld e,0                      ; the station
+    call .get
+    jr z,.title
+    ld hl,lbuf
+    ld de,fname
+    ld b,W_VAL
+    call pl_conv
+    ld hl,fname
+    ld de,Y_FILE*256 + X_VAL
+    ld c,W_VAL
+    ld a,CLR_VALUE
+    call prn_fld
+.title:
+    ld e,1
+    call .get
+    ld hl,lbuf
+    ld de,f_title
+    ld b,FLD_LEN
+    call pl_conv
+    ld hl,f_title
+    ld de,Y_TITLE*256 + X_VAL
+    ld c,W_VAL
+    ld a,CLR_VALUE
+    jp prn_fld
+;; E = 0 / 1 -> lbuf (0-terminated); Z if empty
+.get:
+    ld a,E_CMD_META
+    call esp_run_p
+    ld d,E_REG_STR_SIZE
+    call esp_rd8
+    cp 57
+    jr c,.len
+    ld a,56
+.len:
+    ld (meta_len),a
+    or a
+    jr z,.term
+    ld b,a
+    ld d,E_REG_STR_DATA
+    ld hl,lbuf
+    call esp_rd
+.term:
+    ld a,(meta_len)
+    ld e,a
+    ld d,0
+    ld hl,lbuf
+    add hl,de
+    ld (hl),0
+    ld a,e
     or a
     ret
 
@@ -291,6 +396,10 @@ esp_fill:
 ;; HL = data, DE = bytes (1..BUFSZ): AUDIO_PUSH
 ;; OUT: CF = 1 if the ESP refused it (the caller keeps the data)
 esp_push:
+    ld a,E_CMD_PUSH
+;; A = a command that takes DATA_SIZE bytes by a host DMA write (PUSH, SET_URL)
+esp_send:
+    ld (esp_xcmd),a
     push hl
     push de
     IFDEF FAULT
@@ -310,7 +419,7 @@ esp_push:
     ld d,E_REG_SIZE
     ld hl,esp_tmp4
     call esp_wr32
-    ld a,E_CMD_PUSH
+    ld a,(esp_xcmd)
     call esp_cmd
     ; M2S may come late (the receiver task of the ESP was seen to arm its DMA
     ; after more than one esp_wait, ~0.6 s): wait up to M2S_WAITS of them
@@ -465,14 +574,14 @@ esp_elapsed:
     add hl,bc
     ret
 
-;; Total seconds from the ESP (WAV, FLAC): total / rate. OUT: HL, CF = 1 not known
+;; Total seconds from the ESP: total / rate (WAV, FLAC), else the file length /
+;; the bitrate (AAC). OUT: HL, CF = 1 not known
 esp_total:
     ld hl,(esp_st + ST_TOTAL)
     ld a,h : or l
     ld hl,(esp_st + ST_TOTAL + 2)
     or h : or l
-    scf
-    ret z
+    jr z,esp_total_br
     ld hl,(esp_st + ST_TOTAL) : ld (dvd),hl
     ld hl,(esp_st + ST_TOTAL + 2) : ld (dvd+2),hl
     ld bc,(esp_st + ST_RATE)
@@ -496,6 +605,36 @@ esp_total:
     call div32_16
     ld hl,(dvd)
     or a
+    ret
+
+;; alen / (bitrate / 8). OUT: HL seconds, CF = 1 no bitrate
+esp_total_br:
+    call esp_byterate
+    scf
+    ret z
+    ld b,h
+    ld c,l
+    ld hl,(alen) : ld (dvd),hl
+    ld hl,(alen+2) : ld (dvd+2),hl
+    call div32_16
+    ld hl,(dvd+2)
+    ld a,h : or l
+    scf
+    ret nz                      ; over 65535 s
+    ld hl,(dvd)
+    or a
+    ret
+
+;; OUT: HL = bitrate / 8 (bytes per second, at most 65535), Z if not known
+esp_byterate:
+    ld hl,(esp_st + ST_BITRATE + 1)     ; bitrate / 256 (< 2^24 / 256)
+    ld a,(esp_st + ST_BITRATE)
+    srl h : rr l : rra
+    srl h : rr l : rra
+    srl h : rr l : rra
+    ld h,l                              ; (bitrate / 8) = l:a after 3 shifts of h:l:a
+    ld l,a
+    ld a,h : or l
     ret
 
 ;; The format from the extension of fname: A = A_FMT_*
@@ -523,15 +662,22 @@ ext_fmt:
     inc hl
     ld a,(hl) : or #20 : ld e,a
     ld a,b
-    cp 'm' : jr nz,.w
+    cp 'm' : jr nz,.a4
+    ld a,c
+    cp '4'                      ; .m4a
+    ld a,A_FMT_M4A
+    ret z
     ld a,A_FMT_MP3 : ret
+.a4:
+    cp 'a' : jr nz,.w
+    ld a,A_FMT_AAC : ret
 .w: cp 'w' : jr nz,.o
     ld a,A_FMT_WAV : ret
 .o: cp 'o' : jr nz,.f
     ld a,A_FMT_OGG : ret
-.f: cp 'f' : jr nz,.a
+.f: cp 'f' : jr nz,.x
     ld a,A_FMT_FLAC : ret
-.a: ld a,A_FMT_AUTO
+.x: ld a,A_FMT_AUTO
     ret
 
 ;; Firmware version into DE, "ZiFi32 a.b.c, API n": OUT: DE at the 0
@@ -580,7 +726,7 @@ esp_fmt_update:
     jr z,.err
     ld a,(esp_fmt_shown)
     or a
-    ret nz
+    jr nz,.again
     ld a,(esp_st + ST_FMT)
     or a
     ret z
@@ -600,6 +746,32 @@ esp_fmt_update:
     ld a,CLR_VALUE
     call prn_fld
     jp ui_total
+.again:
+    ; AAC / M4A: the length follows the average bitrate of the ESP (every 10 frames)
+    ld a,(fcnt)
+    or a
+    ret nz
+    ld a,(radio)
+    or a
+    jr z,.aac
+    call ui_status              ; radio: "Connecting", the bitrate
+    jr .line
+.aac:
+    ld a,(esp_st + ST_FMT)
+    cp A_FMT_AAC
+    jr z,.len
+    cp A_FMT_M4A
+    ret nz
+.len:
+    call esp_total
+    ret c
+    ld de,(total_sec)
+    or a
+    sbc hl,de
+    ret z
+    add hl,de
+    ld (total_sec),hl
+    jr .line                    ; the bitrate of the stream line too
 .err:
     ld a,(esp_fmt_shown)
     cp 2
@@ -609,7 +781,12 @@ esp_fmt_update:
     xor a
     ld (err_wait),a
     ld de,fmtbuf
+    ld hl,s_e_net
+    ld a,(esp_st + ST_ERROR)
+    cp #C2
+    jr z,.netx
     ld hl,s_e_fail
+.netx:
     call sapp
     ld a,(esp_st + ST_ERROR)
     call hex8
@@ -645,14 +822,37 @@ esp_build_fmt:
     ld hl,s_e_flac
     cp A_FMT_FLAC
     jr z,.name
+    ld hl,s_e_aac
+    cp A_FMT_AAC
+    jr z,.name
+    ld hl,s_e_m4a
+    cp A_FMT_M4A
+    jr z,.name
     ld hl,s_e_mp3
 .name:
     call sapp
     ld a,(esp_st + ST_FMT)
     or a
-    jr z,.end
+    jp z,.end
     ld hl,s_2sp
     call sapp
+    ; "128 kbps  " when the ESP knows the bitrate (AAC)
+    push de
+    call esp_byterate
+    pop de
+    jr z,.rate
+    push de
+    ld (dvd),hl
+    ld hl,0
+    ld (dvd+2),hl
+    ld bc,125                   ; bytes per second / 125 = kbps
+    call div32_16
+    pop de
+    ld hl,(dvd)
+    call utoa16
+    ld hl,s_kbps2
+    call sapp
+.rate:
     ; rate in kHz: rate / 1000, two decimals, trailing zeros dropped
     push de
     ld hl,(esp_st + ST_RATE) : ld (dvd),hl
@@ -747,7 +947,7 @@ diag:
     ld bc,S_HEAD_LEN
     ld a,CLR_HEAD
     call prn
-    ; "ESP32 answer (AUDIO_GET_STATE): #01"
+    ; "ESP32 answer: #01"
     ld de,linebuf
     ld hl,s_e_ans
     call sapp
@@ -805,12 +1005,16 @@ s_e_wav:    db "WAV",0
 s_e_ogg:    db "Ogg Vorbis",0
 s_e_flac:   db "FLAC",0
 s_e_mp3:    db "MPEG audio",0
+s_e_aac:    db "AAC",0
+s_e_m4a:    db "M4A (AAC)",0
+s_kbps2:    db " kbps  ",0
 s_e_bit:    db " bit  ",0
 s_e_ch:     db " channels",0
 s_e_fail:   db "The ESP32 cannot play this file, error ",0
-s_e_ans:    db "ESP32 answer (AUDIO_GET_STATE): #",0
+s_e_net:    db "No stream: no Wi-Fi, or the address does not answer ",0
+s_e_ans:    db "ESP32 answer: ",0
 s_e_ok:     db "Audio player of ZiFi32 found",0
 s_e_old:    db "No audio player in this ZiFi32: update the ESP32",0
 s_e_none:   db "No answer: no ESP32 on the SPI of the core",0
 s_e_odd:    db "Unexpected answer: the ESP32 is busy or hangs",0
-s_e_use:    db "Press Enter on a .mp3 .wav .ogg .flac file to play it",0
+s_e_use:    db "Enter on .mp3 .wav .ogg .flac .aac .m4a plays it",0

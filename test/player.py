@@ -41,7 +41,7 @@ def mp3(data=cbr, **kw):
 
 # -- header
 t("header: format #10", WMF[32] == 0x10, WMF[32])
-t("header: extensions MP3 WAV OGG FLA", WMF[64:76] == b"MP3WAVOGGFLA", WMF[64:76])
+t("header: extensions MP3 WAV OGG FLA AAC M4A M3U PLS", WMF[64:89] == b"MP3WAVOGGFLAAACM4AM3UPLS\0", WMF[64:89])
 t("header: also from F10 and Shift+F3 (+197 = #05)", WMF[197] == 0x05, WMF[197])
 t("header: Shift+F3 text", WMF[204:228] == b"Play on ESP32".ljust(24), WMF[204:228])
 
@@ -134,6 +134,35 @@ s = mp3(cbr, byte_rate=FAST, late_push=(40,), late_polls=400000, rearm=True)
 code = s.run(max_frames=3000)
 t("very late DMA, ESP 0d4e52c: the file whole", code == 2 and bytes(s.esp_streams[0][1]) == cbr,
   (code, len(s.esp_streams[0][1])))
+# -- AAC (ADTS): the length from the bitrate, seek; M4A: no seek
+aac = raw("s44.aac")
+s = EspSim(WMF, aac, name=b"tone.aac", byte_rate=16000, rate=44100, fmt_found=5, bitrate=128000,
+           keys={150: "right", 300: "esc"})
+code = s.run(snap_at=(100,))
+txt = s.snapshots[100]
+t("AAC: START with the format AAC", s.start_fmts == [5], s.start_fmts)
+t("AAC: stream line with the bitrate", "AAC  128 kbps  44.1 kHz  Stereo" in txt, row(txt, "AAC"))
+t("AAC: length from the bitrate", "00:%02d" % (len(aac) // 16000) in row(txt, "00:"), row(txt, "00:"))
+t("AAC: seek -> FLUSH, the data from the offset",
+  len(s.esp_streams) == 2 and bytes(s.esp_streams[1][1]) == aac[s.esp_streams[1][0]:s.esp_streams[1][0] + len(s.esp_streams[1][1])],
+  [x[0] for x in s.esp_streams])
+# the ESP's first bitrate is off (one frame), the average comes later
+s = EspSim(WMF, aac, name=b"tone.aac", byte_rate=16000, rate=44100, fmt_found=5, bitrate=94000,
+           keys={300: "esc"})
+s.on_frame = {150: lambda: setattr(s, "bitrate", 130000)}
+s.run(snap_at=(100, 250))
+t("AAC: the length follows the bitrate of the ESP",
+  "00:27" in row(s.snapshots[100], "00:") and "00:20" in row(s.snapshots[250], "00:"),
+  (row(s.snapshots[100], "00:"), row(s.snapshots[250], "00:")))
+t("AAC: the stream line follows the bitrate", "130 kbps" in row(s.snapshots[250], "AAC"), row(s.snapshots[250], "AAC"))
+m4a = raw("s44.m4a")
+s = EspSim(WMF, m4a, name=b"tone.m4a", byte_rate=16000, rate=44100, fmt_found=6, bitrate=128000, seekable=False,
+           keys={100: "right", 200: "esc"})
+code = s.run(snap_at=(90,))
+txt = s.snapshots[90]
+t("M4A: START with the format M4A", s.start_fmts == [6], s.start_fmts)
+t("M4A: stream line", "M4A (AAC)  128 kbps  44.1 kHz  Stereo" in txt, row(txt, "M4A"))
+t("M4A: no seek", 0x93 not in s.cmds)
 
 # -- the ESP refuses the stream: the error on the screen, then the next file
 s = EspSim(WMF, wav, fail=0xC0, **WAV)
@@ -226,6 +255,8 @@ for name, kw, want in (("no ESP", dict(esp=False), "No answer"),
     code = s.run(snap_at=(10,))
     t(name + ": Enter -> WC's Shift+F3 menu (1)", code == 1, code)
     t(name + ": says " + want, want in s.snapshots[10], s.snapshots[10])
+    t(name + ": the answer with one '#'", "answer: #" in s.snapshots[10] and "##" not in s.snapshots[10],
+      row(s.snapshots[10], "answer"))
     s = mp3(call_type=4, keys={20: "esc"}, **kw)
     t(name + ", Shift+F3: back to WC (0)", s.run() == 0)
 s = mp3(call_type=3, keys={20: "esc"})

@@ -5,8 +5,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Overview
 
 `ESPPLAY.WMF`: a Wild Commander plugin (plugin system #10, sjasmplus) for TS-Conf with ZiFi32
-(ESP32-S3 on the SPI, ports #77 / #57). It plays MP3 / WAV / Ogg / FLAC on the audio stream player of
-the ESP firmware (`ESP_CMD_AUDIO_*` 0x90..0x97, tslabs/zx-evo#97, `pentevo/esp32/doc/esp32-audio.md`;
+(ESP32-S3 on the SPI, ports #77 / #57). It plays MP3 / WAV / Ogg / FLAC / AAC / M4A, play lists and radio on the audio stream player of
+the ESP firmware (`ESP_CMD_AUDIO_*` 0x90..0x99, tslabs/zx-evo#97 + #98, `pentevo/esp32/doc/esp32-audio.md`;
 our fork andykarpov/zx-evo, branch `karabas/esp32-audio` / `karabas/esp32-release`). The plugin only reads the file
 and pushes it. It was made from the WC plugin of karabas-megabuzz (`firmware/src/wcplugin`,
 MEGABUZZ.WMF): window, ID3 parser, MPEG scan, reader. The Megabuzz backend, clock probing, bass /

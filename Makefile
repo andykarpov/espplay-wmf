@@ -14,6 +14,7 @@ test: $(BINARY)
 	test/gen.sh
 	cd test && $(PYTHON) tags.py ../$(BINARY)
 	cd test && $(PYTHON) player.py ../$(BINARY)
+	cd test && $(PYTHON) playlist.py ../$(BINARY)
 
 clean:
 	rm -f $(BINARY)

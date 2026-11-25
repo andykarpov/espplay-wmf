@@ -24,7 +24,8 @@ class EspSim(Sim):
     def __init__(self, wmf, data, name=b"test.mp3", esp=True, audio=True,
                  rate=44100, channels=2, bits=0, total=0, byte_rate=None,
                  seekable=True, busy_polls=2, fmt_found=None, fail=0, late_push=(), late_polls=70000,
-                 lost_wend=(), rearm=False, **kw):
+                 lost_wend=(), rearm=False, bitrate=0,
+                 radio_meta=None, radio_fail=0, connect_frames=10, net=2, wifi=None, **kw):
         self.esp = esp                  # an ESP answers on the SPI at all
         self.audio = audio              # its firmware has the audio player
         self.rate = rate
@@ -49,6 +50,22 @@ class EspSim(Sim):
         # the armed DMA takes its data (type and size read at the W_END)
         self.rearm = rearm
         self.fmt_found = fmt_found
+        self.bitrate = bitrate          # ESP_REG_AUDIO_BITRATE (AAC)
+        # radio: {frame after AUDIO_URL: (station, title)} (UTF-8), the error of a dead URL
+        self.radio_meta = radio_meta or {}
+        self.radio_fail = radio_fail
+        self.connect_frames = connect_frames
+        self.radio = False
+        self.radio_t = 0
+        self.urls = []
+        self.url = b""
+        self.xfer = None
+        self.meta = [b"", b""]
+        self.meta_seq = 0
+        self.net = net                  # NETSTATE: 2 connected
+        self.wifi = wifi                # (ssid, password) AP_CONNECT accepts
+        self.ap = [b"", b""]
+        self.joins = []
         self.fail = fail                # an error code: the decoder refuses the stream
         self.regs = bytearray(64)
         self.cs = False
@@ -150,15 +167,18 @@ class EspSim(Sim):
 
     def put_state(self):
         r = self.regs
-        flags = (1 if self.seekable and self.opened else 0) | (2 if self.paused else 0) | (4 if self.a_end else 0)
+        flags = (1 if self.seekable and self.opened and not self.radio else 0) | (2 if self.paused else 0) | \
+            (4 if self.a_end else 0) | (8 if self.radio else 0) | \
+            (0x10 if self.radio and self.a_state == A_WAIT else 0)
         r[0x10] = self.a_state
         r[0x11] = (self.fmt_found or self.a_fmt) if self.opened else 0
         r[0x12] = self.channels if self.opened else 0
         r[0x13] = flags
         struct.pack_into("<IIIII", r, 0x14, IN_SIZE - self.ring, self.rate if self.opened else 0,
                          self.played & 0xFFFFFFFF, self.total if self.opened else 0, self.ring)
-        struct.pack_into("<HBB", r, 0x28, 0, self.regs[0x2A] if self.a_state == A_ERROR else 0,
-                         self.bits_ if self.opened else 0)
+        struct.pack_into("<HBBIB", r, 0x28, 0, self.regs[0x2A] if self.a_state == A_ERROR else 0,
+                         self.bits_ if self.opened else 0, self.bitrate if self.opened else 0,
+                         self.meta_seq & 0xFF)
 
     def command(self, c):
         self.cmds.append(c)
@@ -167,6 +187,55 @@ class EspSim(Sim):
             self.armed = True
         if not self.audio and 0x90 <= c <= 0x97:
             self.status(ERR_INV_COMMAND)
+            return
+        if c in (0x90, 0x96, 0x98):                      # START / STOP / URL end a radio
+            self.radio = False
+            self.meta = [b"", b""]
+            self.meta_seq += 1
+        if c in (0x13, 0x14):                            # SET_AP_NAME / PWD
+            n = self.regs[2]
+            self.ap[c - 0x13] = bytes(self.regs[3:3 + n])
+            self.status(ST_READY)
+            return
+        if c == 0x16:                                    # AP_CONNECT
+            self.joins.append(tuple(self.ap))
+            if self.wifi and tuple(x.encode() for x in self.wifi) == tuple(self.ap):
+                self.net = 2
+            self.status(ST_READY)
+            return
+        if c == 0x11:                                    # NETSTATE
+            self.regs[2] = self.net
+            self.status(ST_READY)
+            return
+        if c == 0x18:                                    # SET_URL: DMA like PUSH
+            self.push_n = struct.unpack_from("<I", self.regs, 3)[0]
+            self.xfer = "url"
+            self.armed = True
+            self.regs[1] = ST_M2S
+            self.busy_left = self.busy_polls
+            return
+        if c == 0x98:                                    # AUDIO_URL
+            assert self.url, "AUDIO_URL without a URL"
+            if self.net != 2:
+                self.radio_fail = self.radio_fail or 0xC2
+            self.urls.append(self.url)
+            self.start_fmts.append(self.regs[2])
+            self.a_state = A_WAIT
+            self.ring = self.consumed = self.played = 0
+            self.a_end = self.paused = False
+            self.opened = False
+            self.radio = True
+            self.radio_t = 0
+            self.cur = [None, bytearray()]
+            self.esp_streams.append(self.cur)
+            self.put_state()
+            self.status(ST_READY)
+            return
+        if c == 0x99:                                    # GET_META
+            m = self.meta[1 if self.regs[2] else 0][:56]
+            self.regs[2] = len(m)
+            self.regs[3:3 + len(m)] = m
+            self.status(ST_READY)
             return
         if c == 0x90:                                    # START
             self.a_fmt = self.regs[2]
@@ -246,6 +315,13 @@ class EspSim(Sim):
             return
         self.armed = False
         d = self.data_rx[:self.push_n]
+        if self.xfer == "url":
+            self.xfer = None
+            assert len(self.data_rx) == (self.push_n + 3) & ~3, "SET_URL not padded to 4"
+            self.url = bytes(d)
+            self.data_rx = None
+            self.status(ST_READY)
+            return
         assert len(d) == self.push_n, ("PUSH: %d bytes sent, %d announced" % (len(self.data_rx), self.push_n))
         # the DMA of the ESP32-S3 takes words: the host pads to a multiple of 4
         assert len(self.data_rx) == (self.push_n + 3) & ~3, ("PUSH of %d bytes sent as %d" % (self.push_n, len(self.data_rx)))
@@ -264,6 +340,26 @@ class EspSim(Sim):
 
     def new_frame(self):
         super().new_frame()
+        f = getattr(self, "on_frame", {}).get(self.frame)
+        if f:
+            f()
+        if self.radio and not self.paused:
+            self.radio_t += 1
+            if self.a_state == A_WAIT and self.radio_t >= self.connect_frames:
+                if self.radio_fail:
+                    self.a_state = A_ERROR
+                    self.regs[0x2A] = self.radio_fail
+                    self.put_state()
+                    return
+                self.a_state = A_PLAY
+                self.opened = True
+            if self.radio_t in self.radio_meta:
+                st, ti = self.radio_meta[self.radio_t]
+                self.meta = [st.encode(), ti.encode()]
+                self.meta_seq += 1
+            if self.a_state == A_PLAY:
+                self.played += self.rate // 50
+            return
         if self.a_state in (A_WAIT, A_PLAY, A_DRAIN) and not self.paused:
             if self.a_state == A_WAIT and self.a_end and not self.ring:
                 self.fail = self.fail or 0xC1   # the ESP: no headers, the decoder refuses

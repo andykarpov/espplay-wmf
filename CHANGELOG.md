@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.1.0 (2026-11-26)
+
+Needs the ESP firmware of [tslabs/zx-evo#98](https://github.com/tslabs/zx-evo/pull/98) (on top of #97)
+for AAC, M4A and radio; MP3 / WAV / Ogg / FLAC and play lists of files work with #97 alone.
+
+- AAC (ADTS: AAC-LC, HE-AAC, HE-AACv2) and M4A: the stream line and the length from the average
+  bitrate of the ESP; AAC seeks, M4A does not.
+- Play lists `.m3u`, `.m3u8`, `.pls`: entries opened by name relative to the list, `#EXTINF` /
+  `TitleN` titles, UTF-8 or CP1251, the row `List: n / m`, Space / P through the list.
+- Internet radio: an `http://` / `https://` entry is played by the ESP (`SET_URL` + `AUDIO_URL`);
+  the station and the title (ICY) on the screen, `Connecting...`, the error of a dead station.
+- No Wi-Fi: the plugin joins the network of `/zifi/gopher.ini` (`[zifi32]` `ssid=` / `password=`).
+- Diag (F10): one `#`, the status of a refused START.
+
 ## 1.0.1 (2026-11-26)
 
 - Fixed: playback stopped after some minutes of a long file and the plugin

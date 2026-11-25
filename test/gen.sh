@@ -16,3 +16,5 @@ mkx() { out=$1; shift; [ -f "$out" ] || ffmpeg -loglevel error -y "$@" "$out"; }
 mkx s16.wav    -f lavfi -i "sine=frequency=440:duration=20" -ac 2 -ar 44100 -c:a pcm_s16le
 mkx s48.flac   -f lavfi -i "sine=frequency=440:duration=20" -ac 2 -ar 48000 -c:a flac
 mkx s44.ogg    -f lavfi -i "sine=frequency=440:duration=20" -ac 2 -ar 44100 -c:a libvorbis -q:a 3
+mkx s44.aac    -f lavfi -i "sine=frequency=440:duration=20" -ac 2 -ar 44100 -c:a aac -b:a 128k -f adts
+mkx s44.m4a    -f lavfi -i "sine=frequency=440:duration=20" -ac 2 -ar 44100 -c:a aac -b:a 128k -movflags +faststart

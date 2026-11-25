@@ -2,3 +2,5 @@ ESPPLAY.WMF
 test/work/
 __pycache__/
 venv/
+STRESS.WMF
+FAULT.WMF

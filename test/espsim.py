@@ -265,6 +265,9 @@ class EspSim(Sim):
 
     def new_frame(self):
         super().new_frame()
+        f = getattr(self, "on_frame", {}).get(self.frame)
+        if f:
+            f()
         if self.a_state in (A_WAIT, A_PLAY, A_DRAIN) and not self.paused:
             if self.a_state == A_WAIT and self.a_end and not self.ring:
                 self.fail = self.fail or 0xC1   # the ESP: no headers, the decoder refuses

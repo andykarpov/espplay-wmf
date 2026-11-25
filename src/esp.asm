@@ -213,6 +213,7 @@ esp_start:
     ld e,a
     ld a,E_CMD_START
     call esp_run_p
+    ld (esp_ans),a              ; for the window if refused
     ret c
     cp E_ST_READY
     scf
@@ -619,7 +620,7 @@ esp_fmt_update:
     jr z,.err
     ld a,(esp_fmt_shown)
     or a
-    ret nz
+    jr nz,.again
     ld a,(esp_st + ST_FMT)
     or a
     ret z
@@ -639,6 +640,26 @@ esp_fmt_update:
     ld a,CLR_VALUE
     call prn_fld
     jp ui_total
+.again:
+    ; AAC / M4A: the length follows the average bitrate of the ESP (every 10 frames)
+    ld a,(fcnt)
+    or a
+    ret nz
+    ld a,(esp_st + ST_FMT)
+    cp A_FMT_AAC
+    jr z,.len
+    cp A_FMT_M4A
+    ret nz
+.len:
+    call esp_total
+    ret c
+    ld de,(total_sec)
+    or a
+    sbc hl,de
+    ret z
+    add hl,de
+    ld (total_sec),hl
+    jr .line                    ; the bitrate of the stream line too
 .err:
     ld a,(esp_fmt_shown)
     cp 2
@@ -809,7 +830,7 @@ diag:
     ld bc,S_HEAD_LEN
     ld a,CLR_HEAD
     call prn
-    ; "ESP32 answer (AUDIO_GET_STATE): #01"
+    ; "ESP32 answer: #01"
     ld de,linebuf
     ld hl,s_e_ans
     call sapp
@@ -873,7 +894,7 @@ s_kbps2:    db " kbps  ",0
 s_e_bit:    db " bit  ",0
 s_e_ch:     db " channels",0
 s_e_fail:   db "The ESP32 cannot play this file, error ",0
-s_e_ans:    db "ESP32 answer (AUDIO_GET_STATE): #",0
+s_e_ans:    db "ESP32 answer: ",0
 s_e_ok:     db "Audio player of ZiFi32 found",0
 s_e_old:    db "No audio player in this ZiFi32: update the ESP32",0
 s_e_none:   db "No answer: no ESP32 on the SPI of the core",0

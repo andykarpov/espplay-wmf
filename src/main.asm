@@ -147,7 +147,14 @@ play_file:
 
     xor a
     ld (esp_fmt_shown),a
+    ld a,(radio)
+    or a
+    jr z,.file
+    call esp_radio              ; a URL of the play list: the ESP reads it
+    jr .go
+.file:
     call esp_start
+.go:
     jr nc,.started
     call diag                   ; the ESP refused the stream: say what it answered
     xor a                       ; WCX_ESC
@@ -225,6 +232,9 @@ main_loop:
     jp nz,do_exit
     ld a,(paused)
     ld b,a
+    ld a,(radio)                ; radio: nothing to send
+    or b
+    ld b,a
     ld a,(eof)
     or b
     jr nz,.idle
@@ -248,6 +258,9 @@ main_loop:
 ;; Once per frame: redraw a part of the window, watch the end of the track
 frame_tick:
     call esp_tick
+    ld a,(radio)
+    or a
+    call nz,esp_meta
     ld hl,fcnt
     inc (hl)
     ld a,(hl)
@@ -648,7 +661,7 @@ dvd         ds 4
 m32         ds 4
 utoa_st     ds 1
 ; ESP: the state block of AUDIO_GET_STATE (registers #10..#2B)
-esp_st      ds 32
+esp_st      ds 33
 ST_STATE    equ 0
 ST_FMT      equ 1
 ST_CHANNELS equ 2
@@ -662,12 +675,17 @@ ST_UNDER    equ 24
 ST_ERROR    equ 26
 ST_BITS     equ 27
 ST_BITRATE  equ 28
-ESP_ST_LEN  equ 32
+ST_META     equ 32
+ESP_ST_LEN  equ 33
 esp_fmt     ds 1
 esp_wtry    ds 1
 stress_n    ds 1
 fault_n     ds 1
 fault_on    ds 1
+esp_xcmd    ds 1
+radio       ds 1                ; the entry is a URL: the ESP reads it
+meta_seen   ds 1
+meta_len    ds 1
 ; play list
 pl_mode     ds 1                ; 0, PL_M3U, PL_PLS
 rd_entry    ds 1                ; the stream is on a list entry

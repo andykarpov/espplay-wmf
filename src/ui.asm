@@ -323,13 +323,21 @@ ui_list:
     ld a,CLR_LABEL
     jp prn_fld
 
-;; Paused / end of track message
+;; Paused / end of track / connecting message
 ui_status:
     ld hl,s_empty
     ld a,(eof)
     or a
-    jr z,.p
+    jr z,.c
     ld hl,s_end
+.c:
+    ld a,(radio)
+    or a
+    jr z,.p
+    ld a,(esp_st + ST_FLAGS)
+    and A_FLAG_CONNECT
+    jr z,.p
+    ld hl,s_conn
 .p:
     ld a,(paused)
     or a
@@ -718,6 +726,7 @@ s_keys:     db "Spc:next P:prev <>:seek S:pause +-:vol Esc:exit",0
 s_esp:      db "ESP32",0
 s_notag:    db "(no ID3v2 tag)",0
 s_paused:   db "Paused",0
+s_conn:     db "Connecting...",0
 s_end:      db "End of track",0
 s_empty:    db 0
 s_notime:   db "--:--"

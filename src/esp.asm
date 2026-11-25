@@ -19,9 +19,14 @@ E_REG_STATUS    equ #01
 E_REG_PARAM     equ #02         ; AUDIO_FORMAT / AUDIO_PARAM
 E_REG_SIZE      equ #03         ; DATA_SIZE, 4 bytes
 E_REG_OFFSET    equ #07         ; DATA_OFFSET, 4 bytes
-E_REG_STATE     equ #10         ; state block #10..#2F
+E_REG_STATE     equ #10         ; state block #10..#30
 
 E_CMD_GET_VER   equ #02
+E_CMD_SET_URL   equ #18
+E_CMD_URL       equ #98
+E_CMD_META      equ #99
+E_REG_STR_SIZE  equ #02
+E_REG_STR_DATA  equ #03
 E_CMD_START     equ #90
 E_CMD_PUSH      equ #91
 E_CMD_END       equ #92
@@ -57,6 +62,8 @@ A_FMT_M4A       equ 6
 A_FLAG_SEEKABLE equ #01
 M2S_WAITS       equ 4           ; esp_wait rounds for the M2S of a PUSH
 WEND_TRIES      equ 3           ; W_END sent again while the ESP stays in M2S
+A_FLAG_RADIO    equ #08
+A_FLAG_CONNECT  equ #10
 
 ;; ---------------------------------------------------------------------------
 ;; SPI primitives
@@ -224,6 +231,100 @@ esp_start:
     or a
     ret
 
+;; Radio: the URL in pe_buf + 1 to the ESP (SET_URL), then AUDIO_URL
+;; OUT: CF = 1 refused
+esp_radio:
+    xor a
+    ld (esp_fmt),a              ; told by the ESP
+    ld (esp_ended),a
+    ld (esp_sent_end),a
+    ld (esp_base),a
+    ld (esp_base+1),a
+    ld (meta_seen),a
+    ld hl,pe_buf + 1
+    call strlen                 ; BC = length
+    ld d,b
+    ld e,c
+    ld hl,pe_buf + 1
+    ld a,E_CMD_SET_URL
+    call esp_send
+    ld a,E_ST_BUSY              ; not taken: as a refused START
+    ld (esp_ans),a
+    ret c
+    ld e,A_FMT_AUTO             ; the format from Content-Type
+    ld a,E_CMD_URL
+    call esp_run_p
+    ld (esp_ans),a
+    ret c
+    cp E_ST_READY
+    scf
+    ret nz
+    ld a,(vol)
+    call esp_volume
+    call esp_rd_state
+    or a
+    ret
+
+;; Radio: a new station name / title (META_SEQ changed): into fname / f_title
+;; and on the screen. Called once a frame.
+esp_meta:
+    ld a,(esp_st + ST_META)
+    ld hl,meta_seen
+    cp (hl)
+    ret z
+    ld (hl),a
+    ld e,0                      ; the station
+    call .get
+    jr z,.title
+    ld hl,lbuf
+    ld de,fname
+    ld b,W_VAL
+    call pl_conv
+    ld hl,fname
+    ld de,Y_FILE*256 + X_VAL
+    ld c,W_VAL
+    ld a,CLR_VALUE
+    call prn_fld
+.title:
+    ld e,1
+    call .get
+    ld hl,lbuf
+    ld de,f_title
+    ld b,FLD_LEN
+    call pl_conv
+    ld hl,f_title
+    ld de,Y_TITLE*256 + X_VAL
+    ld c,W_VAL
+    ld a,CLR_VALUE
+    jp prn_fld
+;; E = 0 / 1 -> lbuf (0-terminated); Z if empty
+.get:
+    ld a,E_CMD_META
+    call esp_run_p
+    ld d,E_REG_STR_SIZE
+    call esp_rd8
+    cp 57
+    jr c,.len
+    ld a,56
+.len:
+    ld (meta_len),a
+    or a
+    jr z,.term
+    ld b,a
+    ld d,E_REG_STR_DATA
+    ld hl,lbuf
+    call esp_rd
+.term:
+    ld a,(meta_len)
+    ld e,a
+    ld d,0
+    ld hl,lbuf
+    add hl,de
+    ld (hl),0
+    ld a,e
+    or a
+    ret
+
 ;; Stop the sound (leaving the player)
 esp_stop:
     ld a,E_CMD_STOP
@@ -294,6 +395,10 @@ esp_fill:
 ;; HL = data, DE = bytes (1..BUFSZ): AUDIO_PUSH
 ;; OUT: CF = 1 if the ESP refused it (the caller keeps the data)
 esp_push:
+    ld a,E_CMD_PUSH
+;; A = a command that takes DATA_SIZE bytes by a host DMA write (PUSH, SET_URL)
+esp_send:
+    ld (esp_xcmd),a
     push hl
     push de
     IFDEF FAULT
@@ -313,7 +418,7 @@ esp_push:
     ld d,E_REG_SIZE
     ld hl,esp_tmp4
     call esp_wr32
-    ld a,E_CMD_PUSH
+    ld a,(esp_xcmd)
     call esp_cmd
     ; M2S may come late (the receiver task of the ESP was seen to arm its DMA
     ; after more than one esp_wait, ~0.6 s): wait up to M2S_WAITS of them
@@ -645,6 +750,12 @@ esp_fmt_update:
     ld a,(fcnt)
     or a
     ret nz
+    ld a,(radio)
+    or a
+    jr z,.aac
+    call ui_status              ; radio: "Connecting", the bitrate
+    jr .line
+.aac:
     ld a,(esp_st + ST_FMT)
     cp A_FMT_AAC
     jr z,.len
@@ -669,7 +780,12 @@ esp_fmt_update:
     xor a
     ld (err_wait),a
     ld de,fmtbuf
+    ld hl,s_e_net
+    ld a,(esp_st + ST_ERROR)
+    cp #C2
+    jr z,.netx
     ld hl,s_e_fail
+.netx:
     call sapp
     ld a,(esp_st + ST_ERROR)
     call hex8
@@ -894,6 +1010,7 @@ s_kbps2:    db " kbps  ",0
 s_e_bit:    db " bit  ",0
 s_e_ch:     db " channels",0
 s_e_fail:   db "The ESP32 cannot play this file, error ",0
+s_e_net:    db "No stream: no Wi-Fi, or the address does not answer ",0
 s_e_ans:    db "ESP32 answer: ",0
 s_e_ok:     db "Audio player of ZiFi32 found",0
 s_e_old:    db "No audio player in this ZiFi32: update the ESP32",0

@@ -65,10 +65,35 @@ t("M3U: seek back in an entry: the entry's data from the offset", o is not None 
   (o, len(d)))
 t("M3U: the entry opened again for it", s.fentries.count(b"a.wav") >= 2, s.fentries)
 
-# missing files and addresses are skipped
-s = sim(b"nothere.wav\nhttp://radio.example/stream\na.wav\n")
+# missing files are skipped
+s = sim(b"nothere.wav\na.wav\n")
 code = s.run()
-t("M3U: missing / http entries skipped", streams(s) == [wav] and code == 2, ([len(x) for x in streams(s)], code))
+t("M3U: missing entries skipped", streams(s) == [wav] and code == 2, ([len(x) for x in streams(s)], code))
+
+# -- radio: an address in the list, the ESP reads it
+radio = b"#EXTINF:-1,Test FM\nhttp://radio.example:8000/stream.mp3\na.wav\n"
+meta = {30: ("Test FM", "Artist - Song"), 120: ("Test FM", "Кино - Звезда")}
+s = sim(radio, rate=44100, bitrate=128000, fmt_found=2, radio_meta=meta, keys={200: "space", 260: "esc"})
+code = s.run(snap_at=(5, 60, 150))
+t("radio: SET_URL with the address, then AUDIO_URL", s.urls == [b"http://radio.example:8000/stream.mp3"] and 0x98 in s.cmds,
+  (s.urls, s.cmds[:6]))
+t("radio: nothing pushed", s.esp_streams and not s.esp_streams[0][1], len(s.esp_streams[0][1]) if s.esp_streams else None)
+t("radio: Connecting... at first", "Connecting" in s.snapshots[5], row(s.snapshots[5], "Conn"))
+t("radio: the station in File:", "Test FM" in row(s.snapshots[60], "File:"), row(s.snapshots[60], "File:"))
+t("radio: the title in Title:", "Artist - Song" in row(s.snapshots[60], "Title:"), row(s.snapshots[60], "Title:"))
+t("radio: a new title (UTF-8 Cyrillic)", "Кино - Звезда" in row(s.snapshots[150], "Title:"), row(s.snapshots[150], "Title:"))
+t("radio: Connecting gone", "Connecting" not in s.snapshots[60])
+t("radio: no length", "--:--" in row(s.snapshots[150], " 00:"), row(s.snapshots[150], " 00:"))
+t("radio: the time runs", "00:02" in row(s.snapshots[150], " 00:") or "00:01" in row(s.snapshots[150], " 00:"),
+  row(s.snapshots[150], " 00:"))
+t("radio: Space -> the next entry (a file)", s.start_fmts[-1:] == [1] and len(s.esp_streams) == 2, s.start_fmts)
+t("radio: then Esc -> WC (0)", code == 0, code)
+
+# a dead address: the message, then the next entry
+s = sim(b"http://dead.example/\na.wav\n", radio_fail=0xC2)
+code = s.run(snap_at=(40,))
+t("radio: a dead address says so", "No stream" in s.snapshots[40], row(s.snapshots[40], "No stream"))
+t("radio: then the next entry plays", streams(s)[-1:] == [wav] and code == 2, (code, [len(x) for x in streams(s)]))
 
 # -- PLS: FileN= / TitleN=
 pls = b"[playlist]\nFile1=sub/b.mp3\nTitle1=Song B\nLength1=30\nFile2=a.wav\nNumberOfEntries=2\nVersion=2\n"

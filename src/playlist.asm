@@ -15,6 +15,7 @@ LINE_MAX        equ 255
 ;; OUT: Z = not a list; NZ = a list: CF = 1 it has no entries
 pl_check:
     xor a
+    ld (radio),a
     ld (pl_mode),a
     ld (rd_entry),a
     call ext_ptr                ; HL = after the last '.', Z = none
@@ -73,9 +74,11 @@ pl_open:
     ld hl,(pl_idx)
     call pl_scan
     jr c,.skip
-    ld hl,pe_buf + 1            ; an address (radio): not yet
+    xor a
+    ld (radio),a
+    ld hl,pe_buf + 1            ; an address: the ESP plays it (radio)
     call has_url
-    jr z,.skip
+    jr z,.url
     xor a
     ld (pe_buf),a               ; FENTRY flag: a file
     ld hl,pe_buf
@@ -88,6 +91,18 @@ pl_open:
     ld (rd_entry),a             ; rewinds: FENTRY + GFILE
     ld hl,pe_buf + 1
     ld de,fname
+    ld bc,256
+    ldir
+    or a
+    ret
+.url:
+    ld a,1
+    ld (radio),a
+    ld hl,0
+    ld (file_size),hl
+    ld (file_size+2),hl
+    ld hl,pe_buf + 1
+    ld de,fname                 ; until the ESP has the station name
     ld bc,256
     ldir
     or a

@@ -210,6 +210,7 @@ class EspSim(Sim):
         if c == 0x18:                                    # SET_URL: DMA like PUSH
             self.push_n = struct.unpack_from("<I", self.regs, 3)[0]
             self.xfer = "url"
+            self.armed = True
             self.regs[1] = ST_M2S
             self.busy_left = self.busy_polls
             return

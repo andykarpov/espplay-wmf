@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.1 (2026-11-25)
+## 1.0.1 (2026-11-26)
 
 - Fixed: playback stopped after some minutes of a long file and the plugin
   no longer answered the keys. When the ESP armed its receive DMA later than
@@ -11,6 +11,13 @@
   piece came through, then it froze again. The ESP had missed a W_END (the end
   of a PUSH) and every later PUSH lagged one behind. The plugin now sends the
   W_END again while the ESP still waits for the data (status M2S).
+- With the ESP firmware of [tslabs/zx-evo#97](https://github.com/tslabs/zx-evo/pull/97)
+  from 0d4e52c on, a PUSH whose W_END was lost for good is sent again and taken
+  (the ESP announces its armed DMA again): the stream goes on with the file whole.
+  With older firmware such a PUSH still stops the stream (Esc works). Why the ESP
+  misses a W_END after minutes is not known yet.
+- Test builds: `make stress` (16-byte PUSHes, up to 64 a frame) and `make fault`
+  (every 200th PUSH loses its W_ENDs).
 
 ## 1.0.0 (2026-11-25)
 

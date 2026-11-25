@@ -369,6 +369,12 @@ esp_push:
     ld a,SPI_W_END : out (SPI_DATA),a
     in a,(SPI_DATA)
     call esp_cs_off
+    ; no SPI frame for ~60 us (at 14 MHz): the ESP arms its next DMA in the
+    ; interrupt of the W_END, which resets its SPI slave; a status read in that
+    ; moment could be cut
+    ld b,64
+.idle:
+    djnz .idle
     ld c,1                      ; M2S counts as busy until the W_END is taken
     call esp_wait
     jr nc,.ended

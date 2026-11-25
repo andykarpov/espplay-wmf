@@ -18,4 +18,10 @@ test: $(BINARY)
 clean:
 	rm -f $(BINARY)
 
-.PHONY: all test clean
+# the SPI stress build: PUSHes of 16 bytes, up to 64 a frame (the ESP log counts them)
+stress: $(SRC)
+	$(SJASM) --nologo --msg=war --inc=src -DSTRESS=16 src/main.asm
+	mv $(BINARY) STRESS.WMF
+	$(MAKE) -B $(BINARY)
+
+.PHONY: all test clean stress

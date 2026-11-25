@@ -18,9 +18,16 @@ SECTOR_COST = 3000      # T-states per 512-byte sector read (set per test)
 
 class Sim:
     def __init__(self, wmf, data, name=b"test.mp3", index=1, count=3, keys=None,
-                 hei=25, no_loadnone=False, call_type=0):
+                 hei=25, no_loadnone=False, call_type=0, files=None, folder=""):
         self.m = z80.Z80Machine()
         self.data = data
+        # other files on the card for FENTRY / GFILE: {path: bytes}, paths from the
+        # root with '/', names as WC shows them (CP866), any case; folder = where
+        # the passed file is (the active folder of the panel)
+        self.files = {k.lower(): v for k, v in (files or {}).items()}
+        self.folder = folder
+        self.found = None
+        self.fentries = []              # the paths FENTRY was asked
         self.keys = keys or {}          # frame -> key name or char
         self.pos = 0
         self.frame = 0
@@ -52,6 +59,7 @@ class Sim:
     def start(self, data, name=b"test.mp3", index=1, count=3):
         """(Re)enter the plugin with a file, keeping the memory image."""
         self.data = data
+        self.passed = data
         self.pos = 0
         mem = self.m.memory
         mem[0x7000:0x7000 + len(name) + 1] = name + b"\0"
@@ -169,7 +177,38 @@ class Sim:
             m.hl = dst + n * 512
             m.a = 0x0F if self.pos >= len(self.data) else 0
             cost = n * self.sector_cost
-        elif fn == 0x32:                    # GIPAGPL
+        elif fn == 0x32:                    # GIPAGPL: the file passed to the plugin
+            self.data = self.passed
+            self.pos = 0
+        elif fn == 0x3B:                    # FENTRY: HL = flag, path, 0
+            a = m.hl + 1
+            raw = bytes(mem[a:a + 256]).split(b"\0")[0]
+            self.fentries.append(raw)
+            parts = [p for p in self.folder.split("/") if p]
+            for p in raw.decode("cp866").replace("\\", "/").split("/"):
+                if p in ("", "."):
+                    continue
+                if p == "..":
+                    parts = parts[:-1]
+                else:
+                    parts.append(p)
+            path = "/".join(parts).lower()
+            self.found = self.files.get(path)
+            if self.found is None:
+                self.setz(True)
+            else:
+                self.setz(False)
+                n = len(self.found)
+                m.pc = self.pop()
+                m.hl = n & 0xFFFF
+                m.de = n >> 16
+                m.bc = 0xDEAD
+                m.ix = 0x1234
+                return 300
+        elif fn == 0x3E:                    # GFILE
+            assert self.found is not None, "GFILE without a FENTRY that found a file"
+            self.data = self.found
+            self.found = None
             self.pos = 0
         elif fn == 0x3D:                    # LOADNONE
             assert not self.no_loadnone

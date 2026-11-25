@@ -437,11 +437,13 @@ read_text:
     or a
     ret nz
     ld (rt_dst),hl
+    ld hl,fbyte                 ; the bytes come from the frame
+    ld (rt_src),hl
     ld a,b
     ld (rt_max),a
     xor a
     ld (rt_len),a
-    call fbyte
+    call nbyte
     ret c
     cp 1
     jr z,.bom
@@ -450,7 +452,7 @@ read_text:
     cp 3
     jr z,.utf8
 .cp1251:
-    call fbyte
+    call nbyte
     ret c
     or a
     ret z
@@ -458,8 +460,8 @@ read_text:
     call rt_put
     jr .cp1251
 .bom:
-    call fbyte : ret c : ld d,a
-    call fbyte : ret c : ld e,a
+    call nbyte : ret c : ld d,a
+    call nbyte : ret c : ld e,a
     ld a,d
     cp #FE
     jr z,.be                    ; FE FF: big endian
@@ -470,22 +472,22 @@ read_text:
     ld e,a
     jr .le_chr
 .le:
-    call fbyte : ret c : ld e,a
-    call fbyte : ret c : ld d,a
+    call nbyte : ret c : ld e,a
+    call nbyte : ret c : ld d,a
 .le_chr:
     ld a,d : or e
     ret z
     call uni_put
     jr .le
 .be:
-    call fbyte : ret c : ld d,a
-    call fbyte : ret c : ld e,a
+    call nbyte : ret c : ld d,a
+    call nbyte : ret c : ld e,a
     ld a,d : or e
     ret z
     call uni_put
     jr .be
 .utf8:
-    call fbyte
+    call nbyte
     ret c
     or a
     ret z
@@ -497,9 +499,9 @@ read_text:
     jr c,.two
     cp #F0
     jr c,.three
-    call fbyte : ret c          ; 4-byte sequence: outside the BMP
-    call fbyte : ret c
-    call fbyte : ret c
+    call nbyte : ret c          ; 4-byte sequence: outside the BMP
+    call nbyte : ret c
+    call nbyte : ret c
     ld a,'?'
     call rt_put
     jr .utf8
@@ -510,7 +512,7 @@ read_text:
 .two:
     and #1F
     ld d,a
-    call fbyte
+    call nbyte
     ret c
     and #3F
     ld e,a
@@ -530,7 +532,7 @@ read_text:
     and #0F
     rlca : rlca : rlca : rlca
     ld d,a
-    call fbyte
+    call nbyte
     ret c
     and #3F
     ld e,a
@@ -542,13 +544,21 @@ read_text:
     rrca : rrca
     and #C0
     ld e,a
-    call fbyte
+    call nbyte
     ret c
     and #3F
     or e
     ld e,a
     call uni_put
     jr .utf8
+
+;; The next byte of the text being converted: jumps to (rt_src) (fbyte, or
+;; lbyte of the play list). Keeps HL.
+nbyte:
+    push hl
+    ld hl,(rt_src)
+    ex (sp),hl
+    ret
 
 ;; A < #20 -> space
 ctl_fix:

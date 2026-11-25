@@ -41,7 +41,7 @@ def mp3(data=cbr, **kw):
 
 # -- header
 t("header: format #10", WMF[32] == 0x10, WMF[32])
-t("header: extensions MP3 WAV OGG FLA AAC M4A", WMF[64:83] == b"MP3WAVOGGFLAAACM4A\0", WMF[64:83])
+t("header: extensions MP3 WAV OGG FLA AAC M4A M3U PLS", WMF[64:89] == b"MP3WAVOGGFLAAACM4AM3UPLS\0", WMF[64:89])
 t("header: also from F10 and Shift+F3 (+197 = #05)", WMF[197] == 0x05, WMF[197])
 t("header: Shift+F3 text", WMF[204:228] == b"Play on ESP32".ljust(24), WMF[204:228])
 

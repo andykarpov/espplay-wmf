@@ -224,6 +224,7 @@ ui_draw_all:
     ld de,Y_KEYS*256 + 1
     ld a,CLR_KEYS
     call prn_z
+    call ui_list
     ; total time
 ui_total:
     ld hl,(total_sec)           ; 0: not known (yet)
@@ -297,6 +298,29 @@ ui_dec:
     ld de,Y_DEC*256 + 36
     ld c,7
     ld a,CLR_VALUE
+    jp prn_fld
+
+;; Play list: "List: 3 / 12" under the status
+ui_list:
+    ld a,(pl_mode)
+    or a
+    ret z
+    ld de,lstbuf
+    ld hl,s_list
+    call sapp
+    ld hl,(pl_idx)
+    inc hl
+    call utoa16
+    ld hl,s_of
+    call sapp
+    ld hl,(pl_count)
+    call utoa16
+    xor a
+    ld (de),a
+    ld hl,lstbuf
+    ld de,(Y_STAT+1)*256 + 2
+    ld c,30
+    ld a,CLR_LABEL
     jp prn_fld
 
 ;; Paused / end of track message
@@ -600,6 +624,51 @@ build_fmt:
 INF_W           equ 58
 INF_H           equ 9
 
+;; HL = a message in the small window, then a key; back to WC (WCX_ESC)
+pl_fail:
+    push hl
+    ld hl,inf_tpl
+    ld de,wnd
+    ld bc,WND_SIZE
+    ldir
+    ld a,(WC_HEI)
+    ld b,a
+    sub INF_H
+    srl a
+    ld (wnd+3),a
+    ld c,(80 - INF_W) / 2
+    ld a,b
+    cp 36
+    jr nz,.wx
+    ld c,(90 - INF_W) / 2
+.wx:
+    ld a,c
+    ld (wnd+2),a
+    WCALL WCF_GEDPL
+    ld ix,wnd
+    WCALL WCF_PRWOW
+    ld hl,s_head
+    ld de,0*256 + (INF_W - S_HEAD_LEN) / 2
+    ld bc,S_HEAD_LEN
+    ld a,CLR_HEAD
+    call prn
+    pop hl
+    ld de,2*256 + 2
+    ld a,CLR_VALUE
+    call prn_z
+    ld hl,s_d_key
+    ld de,7*256 + 2
+    ld a,CLR_KEYS
+    call prn_z
+    call wait_key
+    WCALL WCF_USPO
+    ld ix,wnd
+    WCALL WCF_RRESB
+    xor a                       ; WCX_ESC
+    ret
+
+s_pl_empty: db "No files in this play list",0
+
 inf_tpl:
     db 0, 0, 0, 0, INF_W, INF_H, CLR_WIN, 0
     dw 0
@@ -643,6 +712,8 @@ s_l_genre:  db "Genre:",0
 s_l_dec:    db "Decoder:",0
 s_l_vol:    db "Vol:",0
 s_l_buf:    db "Buf",0
+s_list:     db "List: ",0
+s_of:       db " / ",0
 s_keys:     db "Spc:next P:prev <>:seek S:pause +-:vol Esc:exit",0
 s_esp:      db "ESP32",0
 s_notag:    db "(no ID3v2 tag)",0

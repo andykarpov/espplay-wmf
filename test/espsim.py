@@ -24,7 +24,7 @@ class EspSim(Sim):
     def __init__(self, wmf, data, name=b"test.mp3", esp=True, audio=True,
                  rate=44100, channels=2, bits=0, total=0, byte_rate=None,
                  seekable=True, busy_polls=2, fmt_found=None, fail=0, late_push=(), late_polls=70000,
-                 lost_wend=(), rearm=False, **kw):
+                 lost_wend=(), rearm=False, bitrate=0, **kw):
         self.esp = esp                  # an ESP answers on the SPI at all
         self.audio = audio              # its firmware has the audio player
         self.rate = rate
@@ -49,6 +49,7 @@ class EspSim(Sim):
         # the armed DMA takes its data (type and size read at the W_END)
         self.rearm = rearm
         self.fmt_found = fmt_found
+        self.bitrate = bitrate          # ESP_REG_AUDIO_BITRATE (AAC)
         self.fail = fail                # an error code: the decoder refuses the stream
         self.regs = bytearray(64)
         self.cs = False
@@ -157,8 +158,8 @@ class EspSim(Sim):
         r[0x13] = flags
         struct.pack_into("<IIIII", r, 0x14, IN_SIZE - self.ring, self.rate if self.opened else 0,
                          self.played & 0xFFFFFFFF, self.total if self.opened else 0, self.ring)
-        struct.pack_into("<HBB", r, 0x28, 0, self.regs[0x2A] if self.a_state == A_ERROR else 0,
-                         self.bits_ if self.opened else 0)
+        struct.pack_into("<HBBI", r, 0x28, 0, self.regs[0x2A] if self.a_state == A_ERROR else 0,
+                         self.bits_ if self.opened else 0, self.bitrate if self.opened else 0)
 
     def command(self, c):
         self.cmds.append(c)

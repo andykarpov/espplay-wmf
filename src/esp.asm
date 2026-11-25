@@ -19,7 +19,7 @@ E_REG_STATUS    equ #01
 E_REG_PARAM     equ #02         ; AUDIO_FORMAT / AUDIO_PARAM
 E_REG_SIZE      equ #03         ; DATA_SIZE, 4 bytes
 E_REG_OFFSET    equ #07         ; DATA_OFFSET, 4 bytes
-E_REG_STATE     equ #10         ; state block #10..#2B
+E_REG_STATE     equ #10         ; state block #10..#2F
 
 E_CMD_GET_VER   equ #02
 E_CMD_START     equ #90
@@ -51,6 +51,8 @@ A_FMT_WAV       equ 1
 A_FMT_MP3       equ 2
 A_FMT_OGG       equ 3
 A_FMT_FLAC      equ 4
+A_FMT_AAC       equ 5
+A_FMT_M4A       equ 6
 
 A_FLAG_SEEKABLE equ #01
 M2S_WAITS       equ 4           ; esp_wait rounds for the M2S of a PUSH
@@ -465,14 +467,14 @@ esp_elapsed:
     add hl,bc
     ret
 
-;; Total seconds from the ESP (WAV, FLAC): total / rate. OUT: HL, CF = 1 not known
+;; Total seconds from the ESP: total / rate (WAV, FLAC), else the file length /
+;; the bitrate (AAC). OUT: HL, CF = 1 not known
 esp_total:
     ld hl,(esp_st + ST_TOTAL)
     ld a,h : or l
     ld hl,(esp_st + ST_TOTAL + 2)
     or h : or l
-    scf
-    ret z
+    jr z,esp_total_br
     ld hl,(esp_st + ST_TOTAL) : ld (dvd),hl
     ld hl,(esp_st + ST_TOTAL + 2) : ld (dvd+2),hl
     ld bc,(esp_st + ST_RATE)
@@ -496,6 +498,36 @@ esp_total:
     call div32_16
     ld hl,(dvd)
     or a
+    ret
+
+;; alen / (bitrate / 8). OUT: HL seconds, CF = 1 no bitrate
+esp_total_br:
+    call esp_byterate
+    scf
+    ret z
+    ld b,h
+    ld c,l
+    ld hl,(alen) : ld (dvd),hl
+    ld hl,(alen+2) : ld (dvd+2),hl
+    call div32_16
+    ld hl,(dvd+2)
+    ld a,h : or l
+    scf
+    ret nz                      ; over 65535 s
+    ld hl,(dvd)
+    or a
+    ret
+
+;; OUT: HL = bitrate / 8 (bytes per second, at most 65535), Z if not known
+esp_byterate:
+    ld hl,(esp_st + ST_BITRATE + 1)     ; bitrate / 256 (< 2^24 / 256)
+    ld a,(esp_st + ST_BITRATE)
+    srl h : rr l : rra
+    srl h : rr l : rra
+    srl h : rr l : rra
+    ld h,l                              ; (bitrate / 8) = l:a after 3 shifts of h:l:a
+    ld l,a
+    ld a,h : or l
     ret
 
 ;; The format from the extension of fname: A = A_FMT_*
@@ -523,15 +555,22 @@ ext_fmt:
     inc hl
     ld a,(hl) : or #20 : ld e,a
     ld a,b
-    cp 'm' : jr nz,.w
+    cp 'm' : jr nz,.a4
+    ld a,c
+    cp '4'                      ; .m4a
+    ld a,A_FMT_M4A
+    ret z
     ld a,A_FMT_MP3 : ret
+.a4:
+    cp 'a' : jr nz,.w
+    ld a,A_FMT_AAC : ret
 .w: cp 'w' : jr nz,.o
     ld a,A_FMT_WAV : ret
 .o: cp 'o' : jr nz,.f
     ld a,A_FMT_OGG : ret
-.f: cp 'f' : jr nz,.a
+.f: cp 'f' : jr nz,.x
     ld a,A_FMT_FLAC : ret
-.a: ld a,A_FMT_AUTO
+.x: ld a,A_FMT_AUTO
     ret
 
 ;; Firmware version into DE, "ZiFi32 a.b.c, API n": OUT: DE at the 0
@@ -645,14 +684,37 @@ esp_build_fmt:
     ld hl,s_e_flac
     cp A_FMT_FLAC
     jr z,.name
+    ld hl,s_e_aac
+    cp A_FMT_AAC
+    jr z,.name
+    ld hl,s_e_m4a
+    cp A_FMT_M4A
+    jr z,.name
     ld hl,s_e_mp3
 .name:
     call sapp
     ld a,(esp_st + ST_FMT)
     or a
-    jr z,.end
+    jp z,.end
     ld hl,s_2sp
     call sapp
+    ; "128 kbps  " when the ESP knows the bitrate (AAC)
+    push de
+    call esp_byterate
+    pop de
+    jr z,.rate
+    push de
+    ld (dvd),hl
+    ld hl,0
+    ld (dvd+2),hl
+    ld bc,125                   ; bytes per second / 125 = kbps
+    call div32_16
+    pop de
+    ld hl,(dvd)
+    call utoa16
+    ld hl,s_kbps2
+    call sapp
+.rate:
     ; rate in kHz: rate / 1000, two decimals, trailing zeros dropped
     push de
     ld hl,(esp_st + ST_RATE) : ld (dvd),hl
@@ -805,6 +867,9 @@ s_e_wav:    db "WAV",0
 s_e_ogg:    db "Ogg Vorbis",0
 s_e_flac:   db "FLAC",0
 s_e_mp3:    db "MPEG audio",0
+s_e_aac:    db "AAC",0
+s_e_m4a:    db "M4A (AAC)",0
+s_kbps2:    db " kbps  ",0
 s_e_bit:    db " bit  ",0
 s_e_ch:     db " channels",0
 s_e_fail:   db "The ESP32 cannot play this file, error ",0
@@ -813,4 +878,4 @@ s_e_ok:     db "Audio player of ZiFi32 found",0
 s_e_old:    db "No audio player in this ZiFi32: update the ESP32",0
 s_e_none:   db "No answer: no ESP32 on the SPI of the core",0
 s_e_odd:    db "Unexpected answer: the ESP32 is busy or hangs",0
-s_e_use:    db "Press Enter on a .mp3 .wav .ogg .flac file to play it",0
+s_e_use:    db "Enter on .mp3 .wav .ogg .flac .aac .m4a plays it",0

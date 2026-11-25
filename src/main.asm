@@ -32,8 +32,8 @@ header:
     ds 5*2                                  ;     no more blocks
     ds 15                                   ; +48
     db 0                                    ; +63 run by ENTER and F3
-    db "MP3", "WAV", "OGG", "FLA"           ; +64 extensions (FLA: what WC takes of .flac)
-    ds 28*3
+    db "MP3", "WAV", "OGG", "FLA", "AAC", "M4A" ; +64 extensions (FLA: what WC takes of .flac)
+    ds 26*3
     db 0                                    ; +160
     dd #FFFFFFFF                            ; +161 any file size
 name_start:
@@ -587,7 +587,7 @@ dvd         ds 4
 m32         ds 4
 utoa_st     ds 1
 ; ESP: the state block of AUDIO_GET_STATE (registers #10..#2B)
-esp_st      ds 28
+esp_st      ds 32
 ST_STATE    equ 0
 ST_FMT      equ 1
 ST_CHANNELS equ 2
@@ -600,7 +600,8 @@ ST_BUFFERED equ 20
 ST_UNDER    equ 24
 ST_ERROR    equ 26
 ST_BITS     equ 27
-ESP_ST_LEN  equ 28
+ST_BITRATE  equ 28
+ESP_ST_LEN  equ 32
 esp_fmt     ds 1
 esp_wtry    ds 1
 stress_n    ds 1

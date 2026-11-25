@@ -102,6 +102,13 @@ t("Ogg: stream line", "Ogg Vorbis  44.1 kHz" in txt, row(txt, "Ogg"))
 t("Ogg: the arrows do not flush (not seekable)", 0x93 not in s.cmds)
 t("Ogg: length not known", "--:--" in txt)
 
+# -- the ESP arms its DMA after the plugin gave up waiting (seen on the board
+# after minutes of a long file): the plugin sends the data anyway, no dead lock
+s = mp3(cbr, byte_rate=FAST, late_push=(40,))
+code = s.run(max_frames=3000)
+t("late DMA: the file still reaches the ESP whole", code == 2 and bytes(s.esp_streams[0][1]) == cbr,
+  (code, len(s.esp_streams[0][1])))
+
 # -- the ESP refuses the stream: the error on the screen, then the next file
 s = EspSim(WMF, wav, fail=0xC0, **WAV)
 code = s.run(snap_at=(40,))

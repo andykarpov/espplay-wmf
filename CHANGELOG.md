@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.1 (2026-11-25)
+
+- Fixed: playback stopped after some minutes of a long file and the plugin
+  no longer answered the keys. When the ESP armed its receive DMA later than
+  the plugin waited for it, the plugin skipped the data, the ESP kept waiting
+  for it, and no later PUSH could get through. The plugin now sends the data
+  even after the wait times out.
+
 ## 1.0.0 (2026-11-25)
 
 The first release, checked on a Karabas Mini G (TS-Conf core, ESP32-S3 with ZiFi32 and the audio

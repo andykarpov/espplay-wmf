@@ -303,9 +303,12 @@ esp_push:
     call esp_wait
     pop de
     pop hl
-    jr c,.fail
+    ; no M2S in time: the ESP may arm its DMA a moment later and then wait for
+    ; this data for ever (a new PUSH can not get M2S again): send it anyway
+    jr c,.send
     cp E_ST_M2S
-    jr nz,.fail
+    jr nz,.fail                 ; refused (INV_STATE, INV_SIZE ...)
+.send:
     push de
     call esp_cs_on
     ld a,SPI_WR_DATA : out (SPI_DATA),a

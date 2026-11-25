@@ -9,7 +9,7 @@ the SPI. The ESP32 decodes it and plays it through its sound output, together wi
 the OPL of ZiFi32.
 
 ```
-+----------------- ZiFi32 Audio Player v1.0.0 -----------------+
++----------------- ZiFi32 Audio Player v1.0.1 -----------------+
 | File:   01-kino-gruppa_krovi.mp3                             |
 |--------------------------------------------------------------|
 | Title:  Группа крови                                         |

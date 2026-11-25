@@ -5,7 +5,7 @@
 ;;
 ;; Build: sjasmplus --inc=src src/main.asm  ->  ESPPLAY.WMF
 
-    DEFINE VERSION "1.0.1"
+    DEFINE VERSION "1.1.0"
 
 CPU_CLOCK       equ 2           ; TURBOPL: 0 = 3.5, 1 = 7, 2 = 14 MHz
 SEEK_SEC        equ 10          ; seconds per <- / ->

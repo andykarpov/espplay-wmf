@@ -26,6 +26,8 @@ class Sim:
         # the passed file is (the active folder of the panel)
         self.files = {k.lower(): v for k, v in (files or {}).items()}
         self.folder = folder
+        self.streams = {0: folder, 1: folder}   # STREAM: the folder of each stream
+        self.stream = None                      # None: the panel's (not cloned)
         self.found = None
         self.fentries = []              # the paths FENTRY was asked
         self.keys = keys or {}          # frame -> key name or char
@@ -184,7 +186,8 @@ class Sim:
             a = m.hl + 1
             raw = bytes(mem[a:a + 256]).split(b"\0")[0]
             self.fentries.append(raw)
-            parts = [p for p in self.folder.split("/") if p]
+            base = self.folder if self.stream is None else self.streams[self.stream]
+            parts = [p for p in base.split("/") if p]
             for p in raw.decode("cp866").replace("\\", "/").split("/"):
                 if p in ("", "."):
                     continue
@@ -205,6 +208,19 @@ class Sim:
                 m.bc = 0xDEAD
                 m.ix = 0x1234
                 return 300
+        elif fn == 0x39:                    # STREAM
+            if m.d == 0xFE:
+                self.streams = {0: self.folder, 1: self.folder}
+                self.stream = 0
+            elif m.d == 0xFF:
+                assert self.stream is not None, "STREAM #FF before a clone"
+                self.streams[self.stream] = ""
+            elif m.d in (0, 1) and m.bc == 0xFFFF:
+                assert self.stream is not None, "STREAM n before a clone"
+                self.stream = m.d
+            else:
+                raise RuntimeError("STREAM D=%02X BC=%04X" % (m.d, m.bc))
+            self.setz(True)
         elif fn == 0x3E:                    # GFILE
             assert self.found is not None, "GFILE without a FENTRY that found a file"
             self.data = self.found

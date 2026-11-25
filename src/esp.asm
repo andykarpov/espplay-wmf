@@ -241,6 +241,7 @@ esp_radio:
     ld (esp_base),a
     ld (esp_base+1),a
     ld (meta_seen),a
+    call net_up                 ; no network: the one of /zifi/gopher.ini
     ld hl,pe_buf + 1
     call strlen                 ; BC = length
     ld d,b

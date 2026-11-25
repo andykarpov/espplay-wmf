@@ -617,6 +617,7 @@ exit_panel:
     include "mpeg.asm"
     include "ui.asm"
     include "playlist.asm"
+    include "wifi.asm"
 
 ;; Kept while WC keeps the plugin loaded: the volume of the last track
 vol         db VOL_START
@@ -686,6 +687,11 @@ esp_xcmd    ds 1
 radio       ds 1                ; the entry is a URL: the ESP reads it
 meta_seen   ds 1
 meta_len    ds 1
+wf_in       ds 1
+wf_len      ds 1
+wf_size     ds 2
+wf_ssid     ds 33
+wf_pass     ds 64
 ; play list
 pl_mode     ds 1                ; 0, PL_M3U, PL_PLS
 rd_entry    ds 1                ; the stream is on a list entry

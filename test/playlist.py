@@ -89,6 +89,25 @@ t("radio: the time runs", "00:02" in row(s.snapshots[150], " 00:") or "00:01" in
 t("radio: Space -> the next entry (a file)", s.start_fmts[-1:] == [1] and len(s.esp_streams) == 2, s.start_fmts)
 t("radio: then Esc -> WC (0)", code == 0, code)
 
+# -- no network: the one of /zifi/gopher.ini joined first
+INI = (b"; karabas gopher settings\r\n[net]\r\nbackend = auto\r\n[zifi32]\r\nssid = Home Net\r\n"
+       b"password=secret pass\r\nautoconnect=1\r\n[gopher]\r\nhome=gopher://x\r\n")
+files = dict(FILES)
+files["zifi/gopher.ini"] = INI
+s = sim(radio, rate=44100, bitrate=128000, fmt_found=2, radio_meta=meta, net=0, wifi=("Home Net", "secret pass"),
+        files=files, keys={100: "esc"})
+code = s.run(snap_at=(60,))
+t("Wi-Fi: joined with the network of gopher.ini", s.joins == [(b"Home Net", b"secret pass")], s.joins)
+t("Wi-Fi: then the radio plays", "Artist - Song" in row(s.snapshots[60], "Title:"), row(s.snapshots[60], "Title:"))
+t("Wi-Fi: the list entries still found (stream 0 back)", s.stream == 0 and code == 0, (s.stream, code))
+s = sim(radio, net=2, files=files, keys={60: "esc"})
+s.run()
+t("Wi-Fi: connected already -> no join", s.joins == [], s.joins)
+s = sim(radio, net=0, files=FILES, keys={60: "space", 120: "esc"})
+code = s.run(snap_at=(50,))
+t("Wi-Fi: no gopher.ini -> the radio says no stream", "No stream" in s.snapshots[50] and s.joins == [],
+  (row(s.snapshots[50], "No stream"), s.joins))
+
 # a dead address: the message, then the next entry
 s = sim(b"http://dead.example/\na.wav\n", radio_fail=0xC2)
 code = s.run(snap_at=(40,))

@@ -25,7 +25,7 @@ class EspSim(Sim):
                  rate=44100, channels=2, bits=0, total=0, byte_rate=None,
                  seekable=True, busy_polls=2, fmt_found=None, fail=0, late_push=(), late_polls=70000,
                  lost_wend=(), rearm=False, bitrate=0,
-                 radio_meta=None, radio_fail=0, connect_frames=10, **kw):
+                 radio_meta=None, radio_fail=0, connect_frames=10, net=2, wifi=None, **kw):
         self.esp = esp                  # an ESP answers on the SPI at all
         self.audio = audio              # its firmware has the audio player
         self.rate = rate
@@ -62,6 +62,10 @@ class EspSim(Sim):
         self.xfer = None
         self.meta = [b"", b""]
         self.meta_seq = 0
+        self.net = net                  # NETSTATE: 2 connected
+        self.wifi = wifi                # (ssid, password) AP_CONNECT accepts
+        self.ap = [b"", b""]
+        self.joins = []
         self.fail = fail                # an error code: the decoder refuses the stream
         self.regs = bytearray(64)
         self.cs = False
@@ -188,6 +192,21 @@ class EspSim(Sim):
             self.radio = False
             self.meta = [b"", b""]
             self.meta_seq += 1
+        if c in (0x13, 0x14):                            # SET_AP_NAME / PWD
+            n = self.regs[2]
+            self.ap[c - 0x13] = bytes(self.regs[3:3 + n])
+            self.status(ST_READY)
+            return
+        if c == 0x16:                                    # AP_CONNECT
+            self.joins.append(tuple(self.ap))
+            if self.wifi and tuple(x.encode() for x in self.wifi) == tuple(self.ap):
+                self.net = 2
+            self.status(ST_READY)
+            return
+        if c == 0x11:                                    # NETSTATE
+            self.regs[2] = self.net
+            self.status(ST_READY)
+            return
         if c == 0x18:                                    # SET_URL: DMA like PUSH
             self.push_n = struct.unpack_from("<I", self.regs, 3)[0]
             self.xfer = "url"
@@ -196,6 +215,8 @@ class EspSim(Sim):
             return
         if c == 0x98:                                    # AUDIO_URL
             assert self.url, "AUDIO_URL without a URL"
+            if self.net != 2:
+                self.radio_fail = self.radio_fail or 0xC2
             self.urls.append(self.url)
             self.start_fmts.append(self.regs[2])
             self.a_state = A_WAIT

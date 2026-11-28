@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.1 (2026-11-28)
+
+- Fixed: at a switch to the next file the player could stop with its window drawn, `--:--`,
+  the buffer at 0 % and no key answered. It waited for all keys to be released (WCF_USPO), and a
+  key whose release was lost in the short PS/2 buffer stayed held for Wild Commander for ever. The
+  player now waits only for Enter, Space and Esc, at most half a second.
+
 ## 1.1.0 (2026-11-26)
 
 Needs the ESP firmware of [tslabs/zx-evo#98](https://github.com/tslabs/zx-evo/pull/98) (on top of #97)

@@ -5,7 +5,7 @@
 ;;
 ;; Build: sjasmplus --inc=src src/main.asm  ->  ESPPLAY.WMF
 
-    DEFINE VERSION "1.1.0"
+    DEFINE VERSION "1.1.1"
 
 CPU_CLOCK       equ 2           ; TURBOPL: 0 = 3.5, 1 = 7, 2 = 14 MHz
 SEEK_SEC        equ 10          ; seconds per <- / ->
@@ -220,7 +220,7 @@ play_file:
 
     WCALL WCF_GEDPL
     call ui_draw_all
-    WCALL WCF_USPO              ; the ENTER that started us must be released
+    call keys_up                ; the ENTER that started us must be released
     ld hl,(WC_TMN)
     ld (last_tmn),hl
 
@@ -365,9 +365,37 @@ probe:
     WCALL WCF_TURBOPL
     jp esp_detect
 
+;; Wait until Enter, Space and Esc are up, at most KEYS_UP_FRAMES: the key that
+;; started the player (or closed a window) must not act again. Not WCF_USPO: it
+;; waits for ALL keys and for ever, and a key WC took as held (its release lost)
+;; froze the player there before its first PUSH (window drawn, --:--, Buf 0%,
+;; no key answered), seen at an automatic switch to the next file.
+KEYS_UP_FRAMES  equ 25
+
+keys_up:
+    ld b,KEYS_UP_FRAMES
+.loop:
+    push bc
+    call key_enter : jr nz,.held
+    call key_space : jr nz,.held
+    call key_esc   : jr nz,.held
+    pop bc
+    ret
+.held:
+    pop bc
+    ld de,(WC_TMN)
+.frame:
+    ei
+    ld hl,(WC_TMN)
+    or a
+    sbc hl,de
+    jr z,.frame
+    djnz .loop
+    ret
+
 ;; Wait for Esc, Enter, Space or a letter
 wait_key:
-    WCALL WCF_USPO
+    call keys_up
 .loop:
     ei
     call key_esc   : ret nz

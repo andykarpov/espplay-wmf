@@ -9,7 +9,7 @@ The plugin reads the file from the SD card and pushes it to the ESP32 over the S
 the OPL of ZiFi32.
 
 ```
-+----------------- ZiFi32 Audio Player v1.1.0 -----------------+
++----------------- ZiFi32 Audio Player v1.1.1 -----------------+
 | File:   01-kino-gruppa_krovi.mp3                             |
 |--------------------------------------------------------------|
 | Title:  Группа крови                                         |

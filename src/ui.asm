@@ -669,7 +669,7 @@ pl_fail:
     ld a,CLR_KEYS
     call prn_z
     call wait_key
-    WCALL WCF_USPO
+    call keys_up
     ld ix,wnd
     WCALL WCF_RRESB
     xor a                       ; WCX_ESC

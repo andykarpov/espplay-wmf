@@ -18,7 +18,8 @@ SECTOR_COST = 3000      # T-states per 512-byte sector read (set per test)
 
 class Sim:
     def __init__(self, wmf, data, name=b"test.mp3", index=1, count=3, keys=None,
-                 hei=25, no_loadnone=False, call_type=0, files=None, folder=""):
+                 hei=25, no_loadnone=False, call_type=0, files=None, folder="",
+                 held=None, stuck=False):
         self.m = z80.Z80Machine()
         self.data = data
         # other files on the card for FENTRY / GFILE: {path: bytes}, paths from the
@@ -44,6 +45,10 @@ class Sim:
         self.call_type = call_type
         self.clock = 2
         self.cur_key = None
+        # keys held down over frames [a, b): seen by every test, not taken by one
+        self.held = held or {}          # key name -> (first frame, frame of release)
+        # WC takes some key as held for ever (its release lost): USPO never returns
+        self.stuck = stuck
         self.snapshots = {}
 
         import random
@@ -154,8 +159,13 @@ class Sim:
         elif 0x10 <= fn <= 0x29:            # key tests
             names = {0x10: 'space', 0x11: 'up', 0x12: 'down', 0x13: 'left',
                      0x14: 'right', 0x16: 'enter', 0x17: 'esc', 0x18: 'bspc'}
-            self.setz(self.cur_key != names.get(fn))
-            if self.cur_key == names.get(fn):
+            k = names.get(fn)
+            a, b = self.held.get(k, (0, 0))
+            if a <= self.frame < b:
+                self.setz(False)
+            else:
+                self.setz(self.cur_key != k)
+            if self.cur_key == k:
                 self.cur_key = None
         elif fn == 0x2A:                    # KBSCN
             k = self.cur_key
@@ -167,7 +177,8 @@ class Sim:
                 m.a = 0xFF
                 self.setz(True)
         elif fn == 0x2E:                    # USPO
-            pass
+            if self.stuck:
+                raise RuntimeError("USPO with a key WC takes as held: never returns")
         elif fn == 0x30:                    # LOAD512
             n = m.b
             dst = m.hl

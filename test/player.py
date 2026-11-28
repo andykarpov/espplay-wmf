@@ -310,4 +310,23 @@ line = row(s.snapshots[500], "86:") or row(s.snapshots[500], "87:")
 cells = line.count("█")
 t("bar on an 83 MB file ~14 %", 4 <= cells <= 9, (cells, line))
 
+# -- a key WC takes as held for ever (a release lost in the PS/2 FIFO; seen on
+# the board at an automatic switch to the next file): WCF_USPO would never
+# return. The player waits only for Enter / Space / Esc, and not for ever
+s = mp3(cbr, byte_rate=FAST, stuck=True)
+code = s.run(max_frames=3000)
+t("stuck key: plays out, next file", code == 2 and bytes(s.esp_streams[0][1]) == cbr, code)
+s.start(cbr, name=b"next.mp3")
+s.keys = {s.frame + 60: "esc"}
+code = s.run(max_frames=s.frame + 3000)
+t("stuck key: the next file plays, Esc works", code == 0 and len(s.esp_streams) == 2
+  and len(s.esp_streams[1][1]) > 0 and s.cmds[-1] == 0x96, (code, len(s.esp_streams), s.cmds[-3:]))
+# the Enter that started the player, held 10 frames: not taken as "next"
+s = mp3(held={"enter": (0, 10)}, keys={100: "esc"})
+code = s.run(max_frames=3000)
+t("Enter held at the start: not taken as next", code == 0 and len(s.esp_streams) == 1, (code, len(s.esp_streams)))
+s = mp3(esp=False, stuck=True, keys={50: "esc"})
+code = s.run(max_frames=3000)
+t("stuck key: the diagnostic window closes on Esc (no ESP: WCX_NOTMINE)", code == 1, code)
+
 done()
